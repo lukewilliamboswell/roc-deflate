@@ -323,7 +323,7 @@ CompressLazy := [].{
 				# heads read here are the ones from before the insert, so the walk
 				# starts at the previous occurrence rather than at this position.
 				if $in_next.minus_wrap($base) == Matchfinder.window_size {
-					$mf = Matchfinder.rebase_nodes($mf)?
+					$mf = Matchfinder.rebase_nodes($mf)
 					$base = $base.plus_wrap(Matchfinder.window_size)
 				} else {
 				}
@@ -587,7 +587,7 @@ CompressLazy := [].{
 				# heads read here are the ones from before the insert, so the walk
 				# starts at the previous occurrence rather than at this position.
 				if $in_next.minus_wrap($base) == Matchfinder.window_size {
-					$mf = Matchfinder.rebase_nodes($mf)?
+					$mf = Matchfinder.rebase_nodes($mf)
 					$base = $base.plus_wrap(Matchfinder.window_size)
 				} else {
 				}
@@ -675,7 +675,7 @@ CompressLazy := [].{
 							# heads read here are the ones from before the insert, so the walk
 							# starts at the previous occurrence rather than at this position.
 							if $in_next.minus_wrap($base) == Matchfinder.window_size {
-								$mf = Matchfinder.rebase_nodes($mf)?
+								$mf = Matchfinder.rebase_nodes($mf)
 								$base = $base.plus_wrap(Matchfinder.window_size)
 							} else {
 							}
@@ -752,7 +752,7 @@ CompressLazy := [].{
 								# heads read here are the ones from before the insert, so the walk
 								# starts at the previous occurrence rather than at this position.
 								if $in_next.minus_wrap($base) == Matchfinder.window_size {
-									$mf = Matchfinder.rebase_nodes($mf)?
+									$mf = Matchfinder.rebase_nodes($mf)
 									$base = $base.plus_wrap(Matchfinder.window_size)
 								} else {
 								}

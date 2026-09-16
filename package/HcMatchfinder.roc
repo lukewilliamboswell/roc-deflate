@@ -226,7 +226,7 @@ HcMatchfinder := [].{
 			# a window; positions past the slide go in already relative to the
 			# new base.
 			if $cur_pos.plus_wrap(count.to_i64_wrap()).minus_wrap(1) >= Matchfinder.window_size.to_i64_wrap() {
-				$tab = Matchfinder.rebase_nodes($tab)?
+				$tab = Matchfinder.rebase_nodes($tab)
 				$base = $base.plus_wrap(Matchfinder.window_size)
 				$cur_pos = $cur_pos.minus_wrap(Matchfinder.window_size.to_i64_wrap())
 			} else {

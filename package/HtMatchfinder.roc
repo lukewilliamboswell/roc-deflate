@@ -55,7 +55,7 @@ HtMatchfinder := [].{
 		var $tab = tab_0
 		var $base = base_0
 		if in_next.minus_wrap($base) == Matchfinder.window_size {
-			$tab = Matchfinder.rebase_table($tab)?
+			$tab = Matchfinder.rebase_table($tab)
 			$base = $base.plus_wrap(Matchfinder.window_size)
 		} else {
 		}
@@ -153,7 +153,7 @@ HtMatchfinder := [].{
 			var $cur_pos = $in_next.minus_wrap(base_0).to_i64_wrap()
 			# One slide covers the whole run, since it is bounded by a window.
 			if $cur_pos.plus_wrap(count.to_i64_wrap()).minus_wrap(1) >= Matchfinder.window_size.to_i64_wrap() {
-				$tab = Matchfinder.rebase_table($tab)?
+				$tab = Matchfinder.rebase_table($tab)
 				$base = $base.plus_wrap(Matchfinder.window_size)
 				$cur_pos = $cur_pos.minus_wrap(Matchfinder.window_size.to_i64_wrap())
 			} else {

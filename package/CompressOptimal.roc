@@ -719,9 +719,9 @@ CompressOptimal := [].{
 				remaining = in_end - $in_next
 
 				if $in_next == $in_next_slide {
-					$tab3 = Matchfinder.rebase_table($tab3)?
-					$tab4 = Matchfinder.rebase_table($tab4)?
-					$child = Matchfinder.rebase_table($child)?
+					$tab3 = Matchfinder.rebase_table($tab3)
+					$tab4 = Matchfinder.rebase_table($tab4)
+					$child = Matchfinder.rebase_table($child)
 					$in_cur_base = $in_next
 					$in_next_slide = $in_next + remaining.min(Matchfinder.window_size)
 				} else {
@@ -820,9 +820,9 @@ CompressOptimal := [].{
 					while $skip != 0 {
 						remaining2 = in_end - $in_next
 						if $in_next == $in_next_slide {
-							$tab3 = Matchfinder.rebase_table($tab3)?
-							$tab4 = Matchfinder.rebase_table($tab4)?
-							$child = Matchfinder.rebase_table($child)?
+							$tab3 = Matchfinder.rebase_table($tab3)
+							$tab4 = Matchfinder.rebase_table($tab4)
+							$child = Matchfinder.rebase_table($child)
 							$in_cur_base = $in_next
 							$in_next_slide = $in_next + remaining2.min(Matchfinder.window_size)
 						} else {

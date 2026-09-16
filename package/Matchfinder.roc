@@ -48,22 +48,9 @@ Matchfinder := [].{
 
 	## Slide a node table back by one window: a saturating subtract, since a
 	## node already in the first window stays permanently out of it.
-	rebase_nodes : List(U16) -> Try(List(U16), [CompressBug])
-	rebase_nodes = |table0| {
-		var $table = table0
-		n = List.len($table)
-		var $i = 0.U64
-		while $i < n {
-			v = List.get($table, $i) ?? 0
-			slid = if v >= 32768 { v - 32768 } else { 0 }
-			$table = match List.set($table, $i, slid) {
-				Ok(next) => next
-				Err(_) => return Err(CompressBug)
-			}
-			$i = $i + 1
-		}
-		Ok($table)
-	}
+	rebase_nodes : List(U16) -> List(U16)
+	rebase_nodes = |table|
+		List.map(table, |v| if v >= 32768 { v.minus_wrap(32768) } else { 0 })
 
 	## Absolute input index of a biased node.
 	node_index : U64, U16 -> U64
@@ -78,22 +65,9 @@ Matchfinder := [].{
 	## branch: an already-negative entry contributes zero, and the sign bit is
 	## then set unconditionally, which is a saturating subtract of the window
 	## size.
-	rebase_table : List(I16) -> Try(List(I16), [CompressBug])
-	rebase_table = |table0| {
-		var $table = table0
-		n = List.len($table)
-		var $i = 0.U64
-		while $i < n {
-			v = List.get($table, $i) ?? 0
-			slid = Matchfinder.initval.bitwise_or(v.bitwise_and(v.shr_wrap(15).bitwise_not()))
-			$table = match List.set($table, $i, slid) {
-				Ok(next) => next
-				Err(_) => return Err(CompressBug)
-			}
-			$i = $i + 1
-		}
-		Ok($table)
-	}
+	rebase_table : List(I16) -> List(I16)
+	rebase_table = |table|
+		List.map(table, |v| Matchfinder.initval.bitwise_or(v.bitwise_and(v.shr_wrap(15).bitwise_not())))
 
 	## Absolute input index of a stored position, which the tables hold
 	## relative to the sliding base and so may be negative.
