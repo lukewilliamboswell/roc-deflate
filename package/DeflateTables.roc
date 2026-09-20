@@ -178,7 +178,7 @@ DeflateTables := [].{
 	offset_slot : U64 -> U64
 	offset_slot = |offset| {
 		n = 256.U32.minus_wrap(offset.to_u32_wrap()).shr_zf_wrap(29).to_u64()
-		(List.get(DeflateTables.offset_slot_tab, (offset - 1).shr_zf_wrap(n.to_u8_wrap())) ?? 0).to_u64()
-			+ n.shl_wrap(1)
+		(List.get(DeflateTables.offset_slot_tab, offset.minus_wrap(1).shr_zf_wrap(n.to_u8_wrap())) ?? 0).to_u64()
+			.plus_wrap(n.shl_wrap(1))
 	}
 }

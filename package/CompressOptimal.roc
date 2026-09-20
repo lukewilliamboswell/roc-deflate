@@ -414,20 +414,25 @@ CompressOptimal := [].{
 			Err(_) => return Err(CompressBug)
 		}
 
+		# Wrapping arithmetic on the per-node path: the cursor and the cache
+		# pointer only step down while nonzero, a match never reaches past the
+		# block, and a cost is a bit count bounded by the block length times the
+		# longest codeword, so nothing here can overflow and a checked operation
+		# would only put an overflow branch on every candidate length.
 		var $cur = block_length
 		var $cp = cache_end
 		while $cur != 0 {
-			$cur = $cur - 1
-			$cp = $cp - 1
+			$cur = $cur.minus_wrap(1)
+			$cp = $cp.minus_wrap(1)
 			num_matches = (List.get(cache_len, $cp) ?? 0).to_u64()
 			literal = (List.get(cache_off, $cp) ?? 0).to_u64()
 
 			# A literal is always available, so it seeds the comparison.
-			var $best = (List.get(cost_literal, literal) ?? 0) + (List.get($node_cost, $cur + 1) ?? 0)
+			var $best = (List.get(cost_literal, literal) ?? 0).plus_wrap(List.get($node_cost, $cur.plus_wrap(1)) ?? 0)
 			var $item = literal.to_u32_wrap().shl_wrap(CompressOptimal.optimum_offset_shift).bitwise_or(1)
 
 			if num_matches != 0 {
-				var $m = $cp - num_matches
+				var $m = $cp.minus_wrap(num_matches)
 				var $len = DeflateTables.min_match_len
 				while $m != $cp {
 					offset = (List.get(cache_off, $m) ?? 0).to_u64()
@@ -435,19 +440,19 @@ CompressOptimal := [].{
 					this_len = (List.get(cache_len, $m) ?? 0).to_u64()
 					while $len <= this_len {
 						cost_to_end = offset_cost
-							+ (List.get(cost_length, $len) ?? 0)
-							+ (List.get($node_cost, $cur + $len) ?? 0)
+							.plus_wrap(List.get(cost_length, $len) ?? 0)
+							.plus_wrap(List.get($node_cost, $cur.plus_wrap($len)) ?? 0)
 						if cost_to_end < $best {
 							$best = cost_to_end
 							$item = $len.to_u32_wrap()
 								.bitwise_or(offset.to_u32_wrap().shl_wrap(CompressOptimal.optimum_offset_shift))
 						} else {
 						}
-						$len = $len + 1
+						$len = $len.plus_wrap(1)
 					}
-					$m = $m + 1
+					$m = $m.plus_wrap(1)
 				}
-				$cp = $cp - num_matches
+				$cp = $cp.minus_wrap(num_matches)
 			} else {
 			}
 
