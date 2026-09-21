@@ -72,6 +72,11 @@ BtMatchfinder := [].{
 	## and these tables are far larger than the search itself.
 	get_matches : List(I16), List(I16), List(I16), U64, U64, List(U8), U64, U64, U64, U64, U64, List(U32), List(U32), U64 -> Try(Advanced, [CompressBug])
 	get_matches = |tab3_0, tab4_0, child_0, nh3, nh4, input, in_base, cur_pos, max_len, nice_len, max_search_depth, cache_len_0, cache_off_0, cache_ptr_0| {
+		# Wrapping index arithmetic throughout the search and the skip: every
+		# position touched lies in the window the caller bounded against the
+		# input, a child slot is a masked node doubled, and each read's own
+		# bounds test rejects anything that wrapped, so a checked add would only
+		# put an overflow branch ahead of every step of the tree walk.
 		var $tab3 = tab3_0
 		var $tab4 = tab4_0
 		var $child = child_0
@@ -79,9 +84,9 @@ BtMatchfinder := [].{
 		var $cache_off = cache_off_0
 		var $cache_ptr = cache_ptr_0
 
-		in_next = in_base + cur_pos
-		cutoff = cur_pos.to_i32_wrap() - 32768
-		next_hashseq = U32.from_le_bytes(input, in_next + 1) ?? 0
+		in_next = in_base.plus_wrap(cur_pos)
+		cutoff = cur_pos.to_i32_wrap().minus_wrap(32768)
+		next_hashseq = U32.from_le_bytes(input, in_next.plus_wrap(1)) ?? 0
 		hash3 = nh3
 		hash4 = nh4
 		out_hash3 = Matchfinder.lz_hash(next_hashseq.bitwise_and(0xFFFFFF), BtMatchfinder.hash3_order)
@@ -90,14 +95,14 @@ BtMatchfinder := [].{
 
 		# The length-3 hash keeps two ways, so a short match survives one
 		# eviction. Its matches are reported but never entered into a tree.
-		slot3 = hash3 * 2
+		slot3 = hash3.times_wrap(2)
 		node3 = List.get($tab3, slot3) ?? 0
-		node3_2 = List.get($tab3, slot3 + 1) ?? 0
+		node3_2 = List.get($tab3, slot3.plus_wrap(1)) ?? 0
 		$tab3 = match List.set($tab3, slot3, pos) {
 			Ok(next) => next
 			Err(_) => return Err(CompressBug)
 		}
-		$tab3 = match List.set($tab3, slot3 + 1, node3) {
+		$tab3 = match List.set($tab3, slot3.plus_wrap(1), node3) {
 			Ok(next) => next
 			Err(_) => return Err(CompressBug)
 		}
@@ -110,11 +115,11 @@ BtMatchfinder := [].{
 					Ok(next) => next
 					Err(_) => return Err(CompressBug)
 				}
-				$cache_off = match List.set($cache_off, $cache_ptr, (in_next - at3).to_u32_wrap()) {
+				$cache_off = match List.set($cache_off, $cache_ptr, in_next.minus_wrap(at3).to_u32_wrap()) {
 					Ok(next) => next
 					Err(_) => return Err(CompressBug)
 				}
-				$cache_ptr = $cache_ptr + 1
+				$cache_ptr = $cache_ptr.plus_wrap(1)
 			} else if node3_2.to_i32() > cutoff {
 				at3b = Matchfinder.match_index(in_base, node3_2)
 				if seq3 == (U32.from_le_bytes(input, at3b) ?? 0).bitwise_and(0xFFFFFF) {
@@ -122,11 +127,11 @@ BtMatchfinder := [].{
 						Ok(next) => next
 						Err(_) => return Err(CompressBug)
 					}
-					$cache_off = match List.set($cache_off, $cache_ptr, (in_next - at3b).to_u32_wrap()) {
+					$cache_off = match List.set($cache_off, $cache_ptr, in_next.minus_wrap(at3b).to_u32_wrap()) {
 						Ok(next) => next
 						Err(_) => return Err(CompressBug)
 					}
-					$cache_ptr = $cache_ptr + 1
+					$cache_ptr = $cache_ptr.plus_wrap(1)
 				} else {
 				}
 			} else {
@@ -141,8 +146,8 @@ BtMatchfinder := [].{
 		}
 
 		# The two subtrees being rebuilt hang off this position's child slots.
-		var $pending_lt = cur_pos.bitwise_and(32767) * 2
-		var $pending_gt = cur_pos.bitwise_and(32767) * 2 + 1
+		var $pending_lt = cur_pos.bitwise_and(32767).times_wrap(2)
+		var $pending_gt = $pending_lt.plus_wrap(1)
 
 		if node4.to_i32() <= cutoff {
 			$child = match List.set($child, $pending_lt, Matchfinder.initval) {
@@ -177,25 +182,25 @@ BtMatchfinder := [].{
 		while $walking == 1 {
 			match_at = Matchfinder.match_index(in_base, $node)
 
-			if (List.get(input, match_at + $len) ?? 0) == (List.get(input, in_next + $len) ?? 0) {
-				$len = Matchfinder.lz_extend(input, in_next, match_at, $len + 1, max_len)
+			if (List.get(input, match_at.plus_wrap($len)) ?? 0) == (List.get(input, in_next.plus_wrap($len)) ?? 0) {
+				$len = Matchfinder.lz_extend(input, in_next, match_at, $len.plus_wrap(1), max_len)
 				if $len > $best_len {
 					$best_len = $len
 					$cache_len = match List.set($cache_len, $cache_ptr, $len.to_u32_wrap()) {
 						Ok(next) => next
 						Err(_) => return Err(CompressBug)
 					}
-					$cache_off = match List.set($cache_off, $cache_ptr, (in_next - match_at).to_u32_wrap()) {
+					$cache_off = match List.set($cache_off, $cache_ptr, in_next.minus_wrap(match_at).to_u32_wrap()) {
 						Ok(next) => next
 						Err(_) => return Err(CompressBug)
 					}
-					$cache_ptr = $cache_ptr + 1
+					$cache_ptr = $cache_ptr.plus_wrap(1)
 					if $len >= nice_len {
 						# Long enough to stop: hand this node's subtrees to the
 						# two pending slots and leave the tree as it stands.
-						ns = $node.to_i32().bitwise_and(32767).to_u64_wrap() * 2
+						ns = $node.to_i32().bitwise_and(32767).to_u64_wrap().times_wrap(2)
 						node_lt = List.get($child, ns) ?? 0
-						node_gt = List.get($child, ns + 1) ?? 0
+						node_gt = List.get($child, ns.plus_wrap(1)) ?? 0
 						$child = match List.set($child, $pending_lt, node_lt) {
 							Ok(next) => next
 							Err(_) => return Err(CompressBug)
@@ -213,15 +218,15 @@ BtMatchfinder := [].{
 			}
 
 			if $walking == 1 {
-				ns = $node.to_i32().bitwise_and(32767).to_u64_wrap() * 2
-				if (List.get(input, match_at + $len) ?? 0) < (List.get(input, in_next + $len) ?? 0) {
+				ns = $node.to_i32().bitwise_and(32767).to_u64_wrap().times_wrap(2)
+				if (List.get(input, match_at.plus_wrap($len)) ?? 0) < (List.get(input, in_next.plus_wrap($len)) ?? 0) {
 					# This node sorts before the current position, so it and its
 					# left subtree belong to the lesser side.
 					$child = match List.set($child, $pending_lt, $node) {
 						Ok(next) => next
 						Err(_) => return Err(CompressBug)
 					}
-					$pending_lt = ns + 1
+					$pending_lt = ns.plus_wrap(1)
 					$node = List.get($child, $pending_lt) ?? 0
 					$best_lt_len = $len
 					if $best_gt_len < $len {
@@ -242,7 +247,7 @@ BtMatchfinder := [].{
 					}
 				}
 
-				$depth = $depth - 1
+				$depth = $depth.minus_wrap(1)
 				if $node.to_i32() <= cutoff or $depth == 0 {
 					$child = match List.set($child, $pending_lt, Matchfinder.initval) {
 						Ok(next) => next
@@ -283,22 +288,22 @@ BtMatchfinder := [].{
 		var $tab4 = tab4_0
 		var $child = child_0
 
-		in_next = in_base + cur_pos
-		cutoff = cur_pos.to_i32_wrap() - 32768
-		next_hashseq = U32.from_le_bytes(input, in_next + 1) ?? 0
+		in_next = in_base.plus_wrap(cur_pos)
+		cutoff = cur_pos.to_i32_wrap().minus_wrap(32768)
+		next_hashseq = U32.from_le_bytes(input, in_next.plus_wrap(1)) ?? 0
 		hash3 = nh3
 		hash4 = nh4
 		out_hash3 = Matchfinder.lz_hash(next_hashseq.bitwise_and(0xFFFFFF), BtMatchfinder.hash3_order)
 		out_hash4 = Matchfinder.lz_hash(next_hashseq, BtMatchfinder.hash4_order)
 		pos = cur_pos.to_i16_wrap()
 
-		slot3 = hash3 * 2
+		slot3 = hash3.times_wrap(2)
 		node3 = List.get($tab3, slot3) ?? 0
 		$tab3 = match List.set($tab3, slot3, pos) {
 			Ok(next) => next
 			Err(_) => return Err(CompressBug)
 		}
-		$tab3 = match List.set($tab3, slot3 + 1, node3) {
+		$tab3 = match List.set($tab3, slot3.plus_wrap(1), node3) {
 			Ok(next) => next
 			Err(_) => return Err(CompressBug)
 		}
@@ -309,8 +314,8 @@ BtMatchfinder := [].{
 			Err(_) => return Err(CompressBug)
 		}
 
-		var $pending_lt = cur_pos.bitwise_and(32767) * 2
-		var $pending_gt = cur_pos.bitwise_and(32767) * 2 + 1
+		var $pending_lt = cur_pos.bitwise_and(32767).times_wrap(2)
+		var $pending_gt = $pending_lt.plus_wrap(1)
 
 		if node4.to_i32() <= cutoff {
 			$child = match List.set($child, $pending_lt, Matchfinder.initval) {
@@ -341,12 +346,12 @@ BtMatchfinder := [].{
 		while $walking == 1 {
 			match_at = Matchfinder.match_index(in_base, $node)
 
-			if (List.get(input, match_at + $len) ?? 0) == (List.get(input, in_next + $len) ?? 0) {
-				$len = Matchfinder.lz_extend(input, in_next, match_at, $len + 1, nice_len)
+			if (List.get(input, match_at.plus_wrap($len)) ?? 0) == (List.get(input, in_next.plus_wrap($len)) ?? 0) {
+				$len = Matchfinder.lz_extend(input, in_next, match_at, $len.plus_wrap(1), nice_len)
 				if $len >= nice_len {
-					ns = $node.to_i32().bitwise_and(32767).to_u64_wrap() * 2
+					ns = $node.to_i32().bitwise_and(32767).to_u64_wrap().times_wrap(2)
 					node_lt = List.get($child, ns) ?? 0
-					node_gt = List.get($child, ns + 1) ?? 0
+					node_gt = List.get($child, ns.plus_wrap(1)) ?? 0
 					$child = match List.set($child, $pending_lt, node_lt) {
 						Ok(next) => next
 						Err(_) => return Err(CompressBug)
@@ -362,13 +367,13 @@ BtMatchfinder := [].{
 			}
 
 			if $walking == 1 {
-				ns = $node.to_i32().bitwise_and(32767).to_u64_wrap() * 2
-				if (List.get(input, match_at + $len) ?? 0) < (List.get(input, in_next + $len) ?? 0) {
+				ns = $node.to_i32().bitwise_and(32767).to_u64_wrap().times_wrap(2)
+				if (List.get(input, match_at.plus_wrap($len)) ?? 0) < (List.get(input, in_next.plus_wrap($len)) ?? 0) {
 					$child = match List.set($child, $pending_lt, $node) {
 						Ok(next) => next
 						Err(_) => return Err(CompressBug)
 					}
-					$pending_lt = ns + 1
+					$pending_lt = ns.plus_wrap(1)
 					$node = List.get($child, $pending_lt) ?? 0
 					$best_lt_len = $len
 					if $best_gt_len < $len {
@@ -389,7 +394,7 @@ BtMatchfinder := [].{
 					}
 				}
 
-				$depth = $depth - 1
+				$depth = $depth.minus_wrap(1)
 				if $node.to_i32() <= cutoff or $depth == 0 {
 					$child = match List.set($child, $pending_lt, Matchfinder.initval) {
 						Ok(next) => next

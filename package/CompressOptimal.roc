@@ -721,14 +721,14 @@ CompressOptimal := [].{
 
 			var $in_block = 1.U64
 			while $in_block == 1 {
-				remaining = in_end - $in_next
+				remaining = in_end.minus_wrap($in_next)
 
 				if $in_next == $in_next_slide {
 					$tab3 = Matchfinder.rebase_table($tab3)
 					$tab4 = Matchfinder.rebase_table($tab4)
 					$child = Matchfinder.rebase_table($child)
 					$in_cur_base = $in_next
-					$in_next_slide = $in_next + remaining.min(Matchfinder.window_size)
+					$in_next_slide = $in_next.plus_wrap(remaining.min(Matchfinder.window_size))
 				} else {
 				}
 
@@ -748,7 +748,7 @@ CompressOptimal := [].{
 						$nh4,
 						input,
 						$in_cur_base,
-						$in_next - $in_cur_base,
+						$in_next.minus_wrap($in_cur_base),
 						$max_len,
 						$nice_len,
 						params.max_search_depth,
@@ -765,7 +765,7 @@ CompressOptimal := [].{
 					$cache_off = adv.cache_off
 					$cache_ptr = adv.cache_ptr
 					if $cache_ptr > matches_at {
-						$best_len = (List.get($cache_len, $cache_ptr - 1) ?? 0).to_u64()
+						$best_len = (List.get($cache_len, $cache_ptr.minus_wrap(1)) ?? 0).to_u64()
 					} else {
 					}
 				} else {
@@ -777,35 +777,35 @@ CompressOptimal := [].{
 				if $in_next >= $next_observation {
 					if $best_len >= min_len {
 						obs = 8 + if $best_len >= 9 { 1 } else { 0 }
-						obs_count = (List.get($new_observations, obs) ?? 0) + 1
+						obs_count = (List.get($new_observations, obs) ?? 0).plus_wrap(1)
 						$new_observations = match List.set($new_observations, obs, obs_count) {
 							Ok(next) => next
 							Err(_) => return Err(CompressBug)
 						}
-						$num_new_observations = $num_new_observations + 1
-						$next_observation = $in_next + $best_len
+						$num_new_observations = $num_new_observations.plus_wrap(1)
+						$next_observation = $in_next.plus_wrap($best_len)
 						$new_match_len_freqs = match List.set($new_match_len_freqs, $best_len,
-							(List.get($new_match_len_freqs, $best_len) ?? 0) + 1) {
+							(List.get($new_match_len_freqs, $best_len) ?? 0).plus_wrap(1)) {
 							Ok(next) => next
 							Err(_) => return Err(CompressBug)
 						}
 					} else {
 						lit = (List.get(input, $in_next) ?? 0).to_u64()
 						obs = lit.shr_zf_wrap(5).bitwise_and(0x6).bitwise_or(lit.bitwise_and(1))
-						obs_count = (List.get($new_observations, obs) ?? 0) + 1
+						obs_count = (List.get($new_observations, obs) ?? 0).plus_wrap(1)
 						$new_observations = match List.set($new_observations, obs, obs_count) {
 							Ok(next) => next
 							Err(_) => return Err(CompressBug)
 						}
-						$num_new_observations = $num_new_observations + 1
-						$next_observation = $in_next + 1
+						$num_new_observations = $num_new_observations.plus_wrap(1)
+						$next_observation = $in_next.plus_wrap(1)
 					}
 				} else {
 				}
 
 				# Close the position with a header giving how many matches were
 				# written for it and the literal that starts there.
-				$cache_len = match List.set($cache_len, $cache_ptr, ($cache_ptr - matches_at).to_u32_wrap()) {
+				$cache_len = match List.set($cache_len, $cache_ptr, $cache_ptr.minus_wrap(matches_at).to_u32_wrap()) {
 					Ok(next) => next
 					Err(_) => return Err(CompressBug)
 				}
@@ -813,23 +813,23 @@ CompressOptimal := [].{
 					Ok(next) => next
 					Err(_) => return Err(CompressBug)
 				}
-				$in_next = $in_next + 1
-				$cache_ptr = $cache_ptr + 1
+				$in_next = $in_next.plus_wrap(1)
+				$cache_ptr = $cache_ptr.plus_wrap(1)
 
 				# After a very long match, cache no matches for the bytes it
 				# covers. Data with such matches is highly compressible anyway,
 				# so little is lost, and it keeps highly redundant input from
 				# filling the cache with matches nothing will choose.
 				if $best_len >= DeflateTables.min_match_len and $best_len >= $nice_len {
-					var $skip = $best_len - 1
+					var $skip = $best_len.minus_wrap(1)
 					while $skip != 0 {
-						remaining2 = in_end - $in_next
+						remaining2 = in_end.minus_wrap($in_next)
 						if $in_next == $in_next_slide {
 							$tab3 = Matchfinder.rebase_table($tab3)
 							$tab4 = Matchfinder.rebase_table($tab4)
 							$child = Matchfinder.rebase_table($child)
 							$in_cur_base = $in_next
-							$in_next_slide = $in_next + remaining2.min(Matchfinder.window_size)
+							$in_next_slide = $in_next.plus_wrap(remaining2.min(Matchfinder.window_size))
 						} else {
 						}
 						if remaining2 < DeflateTables.max_match_len {
@@ -846,7 +846,7 @@ CompressOptimal := [].{
 								$nh4,
 								input,
 								$in_cur_base,
-								$in_next - $in_cur_base,
+								$in_next.minus_wrap($in_cur_base),
 								$nice_len,
 								params.max_search_depth,
 							)?
@@ -865,9 +865,9 @@ CompressOptimal := [].{
 							Ok(next) => next
 							Err(_) => return Err(CompressBug)
 						}
-						$in_next = $in_next + 1
-						$cache_ptr = $cache_ptr + 1
-						$skip = $skip - 1
+						$in_next = $in_next.plus_wrap(1)
+						$cache_ptr = $cache_ptr.plus_wrap(1)
+						$skip = $skip.minus_wrap(1)
 					}
 				} else {
 				}
@@ -875,9 +875,9 @@ CompressOptimal := [].{
 				if $in_next >= in_max_block_end or $cache_ptr >= CompressOptimal.match_cache_length {
 					$in_block = 0
 				} else if $num_new_observations >= CompressLazy.observations_per_block_check
-					and $in_next - $in_block_begin >= CompressLazy.min_block_length
-					and in_end - $in_next >= CompressLazy.min_block_length {
-					if CompressLazy.do_end_block_check($new_observations, $observations, $num_new_observations, $num_observations, $in_next - $in_block_begin) == 1 {
+					and $in_next.minus_wrap($in_block_begin) >= CompressLazy.min_block_length
+					and in_end.minus_wrap($in_next) >= CompressLazy.min_block_length {
+					if CompressLazy.do_end_block_check($new_observations, $observations, $num_new_observations, $num_observations, $in_next.minus_wrap($in_block_begin)) == 1 {
 						$change_detected = 1
 						$in_block = 0
 					} else {
