@@ -560,7 +560,7 @@ BlockOut := [].{
 					# A length of one marks a literal, whose byte the item
 					# carries where a match would carry its offset.
 					$bitbuf = $bitbuf.bitwise_or((List.get(w_litlen_codewords, payload) ?? 0).to_u64().shl_wrap($bitcount.to_u8_wrap()))
-					$bitcount = $bitcount + (List.get(w_litlen_lens, payload) ?? 0).to_u64()
+					$bitcount = $bitcount.plus_wrap((List.get(w_litlen_lens, payload) ?? 0).to_u64())
 					n = $bitcount.shr_zf_wrap(3)
 					$out = match $bitbuf.append_le_bytes_to($out, n.to_u8_wrap()) {
 						Ok(next) => next
@@ -571,11 +571,11 @@ BlockOut := [].{
 				} else {
 					offset_slot = DeflateTables.offset_slot(payload)
 					$bitbuf = $bitbuf.bitwise_or((List.get(full_codewords, length) ?? 0).to_u64().shl_wrap($bitcount.to_u8_wrap()))
-					$bitcount = $bitcount + (List.get(full_lens, length) ?? 0).to_u64()
+					$bitcount = $bitcount.plus_wrap((List.get(full_lens, length) ?? 0).to_u64())
 					$bitbuf = $bitbuf.bitwise_or((List.get(w_offset_codewords, offset_slot) ?? 0).to_u64().shl_wrap($bitcount.to_u8_wrap()))
-					$bitcount = $bitcount + (List.get(w_offset_lens, offset_slot) ?? 0).to_u64()
-					$bitbuf = $bitbuf.bitwise_or((payload - (List.get(DeflateTables.offset_slot_base, offset_slot) ?? 0).to_u64()).shl_wrap($bitcount.to_u8_wrap()))
-					$bitcount = $bitcount + (List.get(DeflateTables.extra_offset_bits, offset_slot) ?? 0).to_u64()
+					$bitcount = $bitcount.plus_wrap((List.get(w_offset_lens, offset_slot) ?? 0).to_u64())
+					$bitbuf = $bitbuf.bitwise_or(payload.minus_wrap((List.get(DeflateTables.offset_slot_base, offset_slot) ?? 0).to_u64()).shl_wrap($bitcount.to_u8_wrap()))
+					$bitcount = $bitcount.plus_wrap((List.get(DeflateTables.extra_offset_bits, offset_slot) ?? 0).to_u64())
 					n = $bitcount.shr_zf_wrap(3)
 					$out = match $bitbuf.append_le_bytes_to($out, n.to_u8_wrap()) {
 						Ok(next) => next
@@ -584,13 +584,25 @@ BlockOut := [].{
 					$bitbuf = $bitbuf.shr_zf_wrap(n.shl_wrap(3).to_u8_wrap())
 					$bitcount = $bitcount.bitwise_and(7)
 				}
-				$item_at = $item_at + length
+				$item_at = $item_at.plus_wrap(length)
 			}
 
 			packed_litlen = BlockOut.pack_codes(w_litlen_codewords, w_litlen_lens)
 			packed_full = BlockOut.pack_codes(full_codewords, full_lens)
 			packed_offset = BlockOut.pack_offsets(w_offset_codewords, w_offset_lens)
+			# A literal indexes the packed table by its byte, so establishing
+			# the table's length once here lets the bounds test on every
+			# literal's lookup fold away instead of running per symbol.
+			if List.len(packed_litlen) < DeflateTables.num_literals {
+				return Err(CompressBug)
+			} else {
+			}
 
+			# Wrapping arithmetic on the per-symbol path: the bit count never
+			# exceeds the buffer's width between flushes, the cursor never
+			# passes the block's end, and the sequence index never passes the
+			# store's length, so a checked add here would only put an
+			# overflow branch on every symbol.
 			var $seq_idx = 0.U64
 			var $writing = use_items == 0
 			while $writing {
@@ -608,19 +620,19 @@ BlockOut := [].{
 					lit0 = word.bitwise_and(0xFF).to_u64()
 					packed0 = List.get(packed_litlen, lit0) ?? 0
 					$bitbuf = $bitbuf.bitwise_or(packed0.bitwise_and(0xFFFF_FFFF).shl_wrap($bitcount.to_u8_wrap()))
-					$bitcount = $bitcount + packed0.shr_zf_wrap(32)
+					$bitcount = $bitcount.plus_wrap(packed0.shr_zf_wrap(32))
 					lit1 = word.shr_zf_wrap(8).bitwise_and(0xFF).to_u64()
 					packed1 = List.get(packed_litlen, lit1) ?? 0
 					$bitbuf = $bitbuf.bitwise_or(packed1.bitwise_and(0xFFFF_FFFF).shl_wrap($bitcount.to_u8_wrap()))
-					$bitcount = $bitcount + packed1.shr_zf_wrap(32)
+					$bitcount = $bitcount.plus_wrap(packed1.shr_zf_wrap(32))
 					lit2 = word.shr_zf_wrap(16).bitwise_and(0xFF).to_u64()
 					packed2 = List.get(packed_litlen, lit2) ?? 0
 					$bitbuf = $bitbuf.bitwise_or(packed2.bitwise_and(0xFFFF_FFFF).shl_wrap($bitcount.to_u8_wrap()))
-					$bitcount = $bitcount + packed2.shr_zf_wrap(32)
+					$bitcount = $bitcount.plus_wrap(packed2.shr_zf_wrap(32))
 					lit3 = word.shr_zf_wrap(24).to_u64()
 					packed3 = List.get(packed_litlen, lit3) ?? 0
 					$bitbuf = $bitbuf.bitwise_or(packed3.bitwise_and(0xFFFF_FFFF).shl_wrap($bitcount.to_u8_wrap()))
-					$bitcount = $bitcount + packed3.shr_zf_wrap(32)
+					$bitcount = $bitcount.plus_wrap(packed3.shr_zf_wrap(32))
 					$in_next = $in_next.plus_wrap(4)
 					n = $bitcount.shr_zf_wrap(3)
 					$out = match $bitbuf.append_le_bytes_to($out, n.to_u8_wrap()) {
@@ -629,26 +641,26 @@ BlockOut := [].{
 					}
 					$bitbuf = $bitbuf.shr_zf_wrap(n.shl_wrap(3).to_u8_wrap())
 					$bitcount = $bitcount.bitwise_and(7)
-					$litrunlen = $litrunlen - 4
+					$litrunlen = $litrunlen.minus_wrap(4)
 				}
 				if $litrunlen != 0 {
 					lit0 = (List.get(input, $in_next) ?? 0).to_u64()
 					packed0 = List.get(packed_litlen, lit0) ?? 0
 					$bitbuf = $bitbuf.bitwise_or(packed0.bitwise_and(0xFFFF_FFFF).shl_wrap($bitcount.to_u8_wrap()))
-					$bitcount = $bitcount + packed0.shr_zf_wrap(32)
-					$in_next = $in_next + 1
+					$bitcount = $bitcount.plus_wrap(packed0.shr_zf_wrap(32))
+					$in_next = $in_next.plus_wrap(1)
 					if $litrunlen >= 2 {
 						lit1 = (List.get(input, $in_next) ?? 0).to_u64()
 						packed1 = List.get(packed_litlen, lit1) ?? 0
 						$bitbuf = $bitbuf.bitwise_or(packed1.bitwise_and(0xFFFF_FFFF).shl_wrap($bitcount.to_u8_wrap()))
-						$bitcount = $bitcount + packed1.shr_zf_wrap(32)
-						$in_next = $in_next + 1
+						$bitcount = $bitcount.plus_wrap(packed1.shr_zf_wrap(32))
+						$in_next = $in_next.plus_wrap(1)
 						if $litrunlen >= 3 {
 							lit2 = (List.get(input, $in_next) ?? 0).to_u64()
 							packed2 = List.get(packed_litlen, lit2) ?? 0
 							$bitbuf = $bitbuf.bitwise_or(packed2.bitwise_and(0xFFFF_FFFF).shl_wrap($bitcount.to_u8_wrap()))
-							$bitcount = $bitcount + packed2.shr_zf_wrap(32)
-							$in_next = $in_next + 1
+							$bitcount = $bitcount.plus_wrap(packed2.shr_zf_wrap(32))
+							$in_next = $in_next.plus_wrap(1)
 						} else {
 						}
 					} else {
@@ -673,12 +685,12 @@ BlockOut := [].{
 					offset_slot = seq.offset_slot.to_u64()
 					packed_len = List.get(packed_full, length) ?? 0
 					$bitbuf = $bitbuf.bitwise_or(packed_len.bitwise_and(0xFFFF_FFFF).shl_wrap($bitcount.to_u8_wrap()))
-					$bitcount = $bitcount + packed_len.shr_zf_wrap(32)
+					$bitcount = $bitcount.plus_wrap(packed_len.shr_zf_wrap(32))
 					packed_off = List.get(packed_offset, offset_slot) ?? 0
 					$bitbuf = $bitbuf.bitwise_or(packed_off.bitwise_and(0xFFFF).shl_wrap($bitcount.to_u8_wrap()))
-					$bitcount = $bitcount + packed_off.shr_zf_wrap(16).bitwise_and(0xFF)
+					$bitcount = $bitcount.plus_wrap(packed_off.shr_zf_wrap(16).bitwise_and(0xFF))
 					$bitbuf = $bitbuf.bitwise_or(offset.minus_wrap(packed_off.shr_zf_wrap(32)).shl_wrap($bitcount.to_u8_wrap()))
-					$bitcount = $bitcount + packed_off.shr_zf_wrap(24).bitwise_and(0xFF)
+					$bitcount = $bitcount.plus_wrap(packed_off.shr_zf_wrap(24).bitwise_and(0xFF))
 					n = $bitcount.shr_zf_wrap(3)
 					$out = match $bitbuf.append_le_bytes_to($out, n.to_u8_wrap()) {
 						Ok(next) => next
@@ -686,8 +698,8 @@ BlockOut := [].{
 					}
 					$bitbuf = $bitbuf.shr_zf_wrap(n.shl_wrap(3).to_u8_wrap())
 					$bitcount = $bitcount.bitwise_and(7)
-					$in_next = $in_next + length
-					$seq_idx = $seq_idx + 1
+					$in_next = $in_next.plus_wrap(length)
+					$seq_idx = $seq_idx.plus_wrap(1)
 				}
 			}
 
