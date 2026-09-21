@@ -1,11 +1,14 @@
 ## Pieces shared by the Lempel-Ziv matchfinders, ported from libdeflate's
 ## `matchfinder_common.h`.
 ##
-## Positions are stored as signed 16-bit values relative to a base that slides
-## through the input a window at a time. A position at or below the current
-## cutoff is out of the window, so one signed comparison rejects both stale
-## entries and the never-written initial value; that is why the tables start
-## filled with the most negative position rather than zero.
+## Positions are stored as 16-bit values relative to a base that slides
+## through the input a window at a time. The binary-tree matchfinder keeps
+## them signed: a position at or below the current cutoff is out of the
+## window, so one signed comparison rejects both stale entries and the
+## never-written initial value, which is why those tables start filled with
+## the most negative position rather than zero. The hash-table and
+## hash-chain matchfinders keep them biased by the window size instead; see
+## `node_bias`.
 Matchfinder := [].{
 
 	window_order : U64

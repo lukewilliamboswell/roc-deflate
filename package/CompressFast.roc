@@ -38,7 +38,7 @@ CompressFast := [].{
 		var $max_len = DeflateTables.max_match_len
 		var $nice_len = nice_match_length.min(DeflateTables.max_match_len)
 		# Held apart rather than in one record: see HtMatchfinder.State.
-		var $tab = Matchfinder.init_table(HtMatchfinder.table_size)
+		var $tab = Matchfinder.init_nodes(HtMatchfinder.table_size)
 		var $base = 0.U64
 		var $nh = 0.U64
 		# One allocation for the whole stream: a block appends its sequences and

@@ -2,6 +2,11 @@ import Matchfinder
 
 ## The hash-table matchfinder, ported from libdeflate's `ht_matchfinder.h`.
 ##
+## Positions are stored biased by the window size, as the hash-chain
+## matchfinder stores them (see `Matchfinder.node_bias`): the in-window test
+## is one unsigned comparison against the current position, and a candidate's
+## index is a wrapping add, so no entry needs sign-extending.
+##
 ## Where the hash-chains matchfinder walks a chain, this keeps a fixed two
 ## entries per hash bucket and looks at both, which bounds the work per
 ## position without needing a depth counter. Only length-4 and longer matches
@@ -34,9 +39,9 @@ HtMatchfinder := [].{
 	## The table is passed separately from the scalars rather than inside a
 	## record: a record holding a list is copied when it crosses a call
 	## boundary, which for a table this size costs far more than the search.
-	State : { hash_tab : List(I16), in_cur_base : U64, next_hash : U64 }
+	State : { hash_tab : List(U16), in_cur_base : U64, next_hash : U64 }
 
-	Match : { hash_tab : List(I16), in_cur_base : U64, next_hash : U64, length : U64, offset : U64 }
+	Match : { hash_tab : List(U16), in_cur_base : U64, next_hash : U64, length : U64, offset : U64 }
 
 	## Find the longest match at `in_next`, considering the two candidates in
 	## the position's hash bucket.
@@ -46,7 +51,7 @@ HtMatchfinder := [].{
 	## with this hash. The copy happens even when the first candidate already
 	## reaches `nice_len`, which costs nothing and keeps the store off the
 	## branch.
-	longest_match : List(I16), U64, U64, List(U8), U64, U64, U64 -> Try(Match, [CompressBug])
+	longest_match : List(U16), U64, U64, List(U8), U64, U64, U64 -> Try(Match, [CompressBug])
 	longest_match = |tab_0, base_0, hash_0, input, in_next, max_len, nice_len| {
 		if List.len(input) < 4 {
 			return Err(CompressBug)
@@ -55,13 +60,14 @@ HtMatchfinder := [].{
 		var $tab = tab_0
 		var $base = base_0
 		if in_next.minus_wrap($base) == Matchfinder.window_size {
-			$tab = Matchfinder.rebase_table($tab)
+			$tab = Matchfinder.rebase_nodes($tab)
 			$base = $base.plus_wrap(Matchfinder.window_size)
 		} else {
 		}
 		in_base = $base
+		# A node at or below the current position, in the biased space the
+		# tables use, is out of the window.
 		cur_pos = in_next.minus_wrap(in_base)
-		cutoff = cur_pos.to_i32_wrap().minus_wrap(32768)
 
 		hash = hash_0
 		next_hash = Matchfinder.lz_hash(U32.from_le_bytes(input, in_next.plus_wrap(1)) ?? 0, HtMatchfinder.hash_order)
@@ -73,7 +79,7 @@ HtMatchfinder := [].{
 		} else {
 		}
 		cur_node0 = List.get($tab, slot0) ?? 0
-		tab1 = match List.set($tab, slot0, cur_pos.to_i16_wrap()) {
+		tab1 = match List.set($tab, slot0, cur_pos.plus_wrap(Matchfinder.node_bias).to_u16_wrap()) {
 			Ok(next) => next
 			Err(_) => return Err(CompressBug)
 		}
@@ -81,10 +87,10 @@ HtMatchfinder := [].{
 		var $best_len = 0.U64
 		var $best_match_at = in_next
 
-		if cur_node0.to_i32() <= cutoff {
+		if cur_node0.to_u64() <= cur_pos {
 			Ok({ hash_tab: tab1, in_cur_base: in_base, next_hash, length: 0, offset: 0 })
 		} else {
-			match0_at = Matchfinder.match_index(in_base, cur_node0)
+			match0_at = Matchfinder.node_index(in_base, cur_node0)
 
 			# Push the displaced entry into the second slot.
 			cur_node1 = List.get(tab1, slot0.plus_wrap(1)) ?? 0
@@ -96,9 +102,9 @@ HtMatchfinder := [].{
 			if (U32.from_le_bytes(input, match0_at) ?? 0) == seq {
 				$best_len = Matchfinder.lz_extend(input, in_next, match0_at, 4, max_len)
 				$best_match_at = match0_at
-				if cur_node1.to_i32() <= cutoff or $best_len >= nice_len {
+				if cur_node1.to_u64() <= cur_pos or $best_len >= nice_len {
 				} else {
-					match1_at = Matchfinder.match_index(in_base, cur_node1)
+					match1_at = Matchfinder.node_index(in_base, cur_node1)
 					if (U32.from_le_bytes(input, match1_at) ?? 0) == seq
 						and (U32.from_le_bytes(input, match1_at.plus_wrap($best_len).minus_wrap(3)) ?? 0)
 							== (U32.from_le_bytes(input, in_next.plus_wrap($best_len).minus_wrap(3)) ?? 0) {
@@ -112,9 +118,9 @@ HtMatchfinder := [].{
 					}
 				}
 			} else {
-				if cur_node1.to_i32() <= cutoff {
+				if cur_node1.to_u64() <= cur_pos {
 				} else {
-					match1_at = Matchfinder.match_index(in_base, cur_node1)
+					match1_at = Matchfinder.node_index(in_base, cur_node1)
 					if (U32.from_le_bytes(input, match1_at) ?? 0) == seq {
 						$best_len = Matchfinder.lz_extend(input, in_next, match1_at, 4, max_len)
 						$best_match_at = match1_at
@@ -134,7 +140,7 @@ HtMatchfinder := [].{
 	}
 
 	## Insert `count` positions into the buckets without searching them.
-	skip_bytes : List(I16), U64, U64, List(U8), U64, U64, U64 -> Try(State, [CompressBug])
+	skip_bytes : List(U16), U64, U64, List(U8), U64, U64, U64 -> Try(State, [CompressBug])
 	skip_bytes = |tab_0, base_0, hash_0, input, in_next0, in_end, count| {
 		# The run ends at `end`, and every hash read the loop makes lies within
 		# `required_nbytes` of it. Bounding the run against the input's length
@@ -153,7 +159,7 @@ HtMatchfinder := [].{
 			var $cur_pos = $in_next.minus_wrap(base_0).to_i64_wrap()
 			# One slide covers the whole run, since it is bounded by a window.
 			if $cur_pos.plus_wrap(count.to_i64_wrap()).minus_wrap(1) >= Matchfinder.window_size.to_i64_wrap() {
-				$tab = Matchfinder.rebase_table($tab)
+				$tab = Matchfinder.rebase_nodes($tab)
 				$base = $base.plus_wrap(Matchfinder.window_size)
 				$cur_pos = $cur_pos.minus_wrap(Matchfinder.window_size.to_i64_wrap())
 			} else {
@@ -174,7 +180,7 @@ HtMatchfinder := [].{
 					Ok(next) => next
 					Err(_) => return Err(CompressBug)
 				}
-				$tab = match List.set(tab1, slot0, $cur_pos.to_i16_wrap()) {
+				$tab = match List.set(tab1, slot0, $cur_pos.plus_wrap(Matchfinder.node_bias.to_i64_wrap()).to_u16_wrap()) {
 					Ok(next) => next
 					Err(_) => return Err(CompressBug)
 				}
