@@ -2,13 +2,10 @@
 ## `matchfinder_common.h`.
 ##
 ## Positions are stored as 16-bit values relative to a base that slides
-## through the input a window at a time. The binary-tree matchfinder keeps
-## them signed: a position at or below the current cutoff is out of the
-## window, so one signed comparison rejects both stale entries and the
-## never-written initial value, which is why those tables start filled with
-## the most negative position rather than zero. The hash-table and
-## hash-chain matchfinders keep them biased by the window size instead; see
-## `node_bias`.
+## through the input a window at a time, biased by the window size (see
+## `node_bias`): a never-written slot is zero and one unsigned comparison
+## against the current position rejects it together with every stale entry,
+## so the tables start as plain zeros.
 Matchfinder := [].{
 
 	window_order : U64
@@ -16,11 +13,6 @@ Matchfinder := [].{
 
 	window_size : U64
 	window_size = 32768
-
-	## The value every table entry starts at: far enough back that it can never
-	## pass the in-window test.
-	initval : I16
-	initval = -32768
 
 	## Hash a sequence prefix held in the low bits of a 32-bit value.
 	##
@@ -30,13 +22,7 @@ Matchfinder := [].{
 	lz_hash = |seq, num_bits|
 		seq.times_wrap(0x1E35A7BD).shr_zf_wrap((32 - num_bits).to_u8_wrap()).to_u64()
 
-	## Fill a table with the initial out-of-window position.
-	init_table : U64 -> List(I16)
-	init_table = |num_entries|
-		List.repeat(Matchfinder.initval, num_entries)
-
-	## The hash-chain matchfinder stores positions biased by the window size
-	## instead of signed: a node is `position + window_size`, so the initial
+	## A node is `position + window_size`, so the initial
 	## value is zero, a stale entry is rejected by an unsigned comparison
 	## against the current position, the chain slot is the node masked, and
 	## the absolute index is a wrapping add. Nothing in the chain walk then
@@ -59,27 +45,6 @@ Matchfinder := [].{
 	node_index : U64, U16 -> U64
 	node_index = |in_base, node|
 		in_base.plus_wrap(node.to_u64()).minus_wrap(Matchfinder.node_bias)
-
-	## Slide a table back by one window, so its entries stay relative to the
-	## new base.
-	##
-	## Entries that would pass below the most negative position stay there,
-	## permanently out of the window. The subtraction is written without a
-	## branch: an already-negative entry contributes zero, and the sign bit is
-	## then set unconditionally, which is a saturating subtract of the window
-	## size.
-	rebase_table : List(I16) -> List(I16)
-	rebase_table = |table|
-		List.map(table, |v| Matchfinder.initval.bitwise_or(v.bitwise_and(v.shr_wrap(15).bitwise_not())))
-
-	## Absolute input index of a stored position, which the tables hold
-	## relative to the sliding base and so may be negative.
-	match_index : U64, I16 -> U64
-	match_index = |in_base, node| {
-		abs : I64
-		abs = in_base.to_i64_wrap().plus_wrap(node.to_i64())
-		abs.to_u64_wrap()
-	}
 
 	## Number of bytes at `match_at` that equal the bytes at `str_at`, counting
 	## the `start_len` bytes the caller already matched and stopping at

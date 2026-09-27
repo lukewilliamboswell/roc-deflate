@@ -648,9 +648,9 @@ CompressOptimal := [].{
 		# The matchfinder tables and the two big per-block arrays are held as
 		# separate values rather than in one record: a record of lists is
 		# copied whenever it crosses a call boundary.
-		var $tab3 = Matchfinder.init_table(BtMatchfinder.hash3_size)
-		var $tab4 = Matchfinder.init_table(BtMatchfinder.hash4_size)
-		var $child = Matchfinder.init_table(BtMatchfinder.child_size)
+		var $tab3 = Matchfinder.init_nodes(BtMatchfinder.hash3_size)
+		var $tab4 = Matchfinder.init_nodes(BtMatchfinder.hash4_size)
+		var $child = Matchfinder.init_nodes(BtMatchfinder.child_size)
 		var $nh3 = 0.U64
 		var $nh4 = 0.U64
 
@@ -724,9 +724,9 @@ CompressOptimal := [].{
 				remaining = in_end.minus_wrap($in_next)
 
 				if $in_next == $in_next_slide {
-					$tab3 = Matchfinder.rebase_table($tab3)
-					$tab4 = Matchfinder.rebase_table($tab4)
-					$child = Matchfinder.rebase_table($child)
+					$tab3 = Matchfinder.rebase_nodes($tab3)
+					$tab4 = Matchfinder.rebase_nodes($tab4)
+					$child = Matchfinder.rebase_nodes($child)
 					$in_cur_base = $in_next
 					$in_next_slide = $in_next.plus_wrap(remaining.min(Matchfinder.window_size))
 				} else {
@@ -825,9 +825,9 @@ CompressOptimal := [].{
 					while $skip != 0 {
 						remaining2 = in_end.minus_wrap($in_next)
 						if $in_next == $in_next_slide {
-							$tab3 = Matchfinder.rebase_table($tab3)
-							$tab4 = Matchfinder.rebase_table($tab4)
-							$child = Matchfinder.rebase_table($child)
+							$tab3 = Matchfinder.rebase_nodes($tab3)
+							$tab4 = Matchfinder.rebase_nodes($tab4)
+							$child = Matchfinder.rebase_nodes($child)
 							$in_cur_base = $in_next
 							$in_next_slide = $in_next.plus_wrap(remaining2.min(Matchfinder.window_size))
 						} else {
