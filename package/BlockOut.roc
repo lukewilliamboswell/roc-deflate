@@ -551,9 +551,12 @@ BlockOut := [].{
 			full_codewords = full.codewords
 			full_lens = full.lens
 
+			# The path holds node `n` at `items_top - n`, the highest node a
+			# match near the end of the block can reach, capped at the table.
+			items_top = block_length.minus_wrap(1).plus_wrap(DeflateTables.max_match_len).min(List.len(items).minus_wrap(1))
 			var $item_at = if use_items == 1 { 0.U64 } else { block_length }
 			while $item_at != block_length {
-				item = List.get(items, $item_at) ?? 0
+				item = List.get(items, items_top.minus_wrap($item_at)) ?? 0
 				length = item.bitwise_and(0x1FF).to_u64()
 				payload = item.shr_zf_wrap(9).to_u64()
 				if length == 1 {

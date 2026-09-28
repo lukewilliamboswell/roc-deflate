@@ -404,12 +404,28 @@ CompressOptimal := [].{
 	## cached matches. For each length only the nearest offset that reaches it
 	## is considered, which is what makes that scan linear in the number of
 	## matches rather than quadratic.
+	##
+	## The node tables hold node `n` at index `top - n` (see `node_top`), so
+	## the search writes them from low addresses upward and reads the nodes
+	## just below its write cursor, the direction the hardware prefetches.
 	find_min_cost_path : U64, List(U32), List(U32), U64, List(U32), List(U32), List(U32), List(U32), List(U32) -> Try(PathResult, [CompressBug])
 	find_min_cost_path = |block_length, cache_len, cache_off, cache_end, node_cost_0, node_item_0, cost_literal, cost_length, cost_offset_slot| {
+		top = CompressOptimal.node_top(block_length)
 		var $node_cost = node_cost_0
 		var $node_item = node_item_0
 
-		$node_cost = match List.set($node_cost, block_length, 0) {
+		# Make the block really end where it should, even though matches found
+		# near the end may reach past it: every node past the end costs too
+		# much to ever be chosen.
+		var $guard = top
+		while $guard != block_length {
+			$node_cost = match List.set($node_cost, top.minus_wrap($guard), 0x80000000) {
+				Ok(next) => next
+				Err(_) => return Err(CompressBug)
+			}
+			$guard = $guard.minus_wrap(1)
+		}
+		$node_cost = match List.set($node_cost, top.minus_wrap(block_length), 0) {
 			Ok(next) => next
 			Err(_) => return Err(CompressBug)
 		}
@@ -428,7 +444,7 @@ CompressOptimal := [].{
 			literal = (List.get(cache_off, $cp) ?? 0).to_u64()
 
 			# A literal is always available, so it seeds the comparison.
-			var $best = (List.get(cost_literal, literal) ?? 0).plus_wrap(List.get($node_cost, $cur.plus_wrap(1)) ?? 0)
+			var $best = (List.get(cost_literal, literal) ?? 0).plus_wrap(List.get($node_cost, top.minus_wrap($cur.plus_wrap(1))) ?? 0)
 			var $item = literal.to_u32_wrap().shl_wrap(CompressOptimal.optimum_offset_shift).bitwise_or(1)
 
 			if num_matches != 0 {
@@ -441,7 +457,7 @@ CompressOptimal := [].{
 					while $len <= this_len {
 						cost_to_end = offset_cost
 							.plus_wrap(List.get(cost_length, $len) ?? 0)
-							.plus_wrap(List.get($node_cost, $cur.plus_wrap($len)) ?? 0)
+							.plus_wrap(List.get($node_cost, top.minus_wrap($cur.plus_wrap($len))) ?? 0)
 						if cost_to_end < $best {
 							$best = cost_to_end
 							$item = $len.to_u32_wrap()
@@ -456,11 +472,11 @@ CompressOptimal := [].{
 			} else {
 			}
 
-			$node_cost = match List.set($node_cost, $cur, $best) {
+			$node_cost = match List.set($node_cost, top.minus_wrap($cur), $best) {
 				Ok(next) => next
 				Err(_) => return Err(CompressBug)
 			}
-			$node_item = match List.set($node_item, $cur, $item) {
+			$node_item = match List.set($node_item, top.minus_wrap($cur), $item) {
 				Ok(next) => next
 				Err(_) => return Err(CompressBug)
 			}
@@ -469,15 +485,23 @@ CompressOptimal := [].{
 		Ok({ node_cost: $node_cost, node_item: $node_item })
 	}
 
+	## The index of node 0 in a path's node tables, which hold node `n` at
+	## `top - n`: the highest node a match found near the end of the block can
+	## reach, capped at the table size.
+	node_top : U64 -> U64
+	node_top = |block_length|
+		block_length.minus_wrap(1).plus_wrap(DeflateTables.max_match_len).min(CompressOptimal.optimum_nodes_size - 1)
+
 	## Count the symbols a chosen path uses and build the Huffman codes for
 	## them, walking the path forwards this time.
 	tally_and_build_codes : List(U32), U64 -> Try(TallyResult, [CompressBug])
 	tally_and_build_codes = |node_item, block_length| {
 		var $freqs_litlen = List.repeat(0.U32, DeflateTables.num_litlen_syms)
 		var $freqs_offset = List.repeat(0.U32, DeflateTables.num_offset_syms)
+		top = CompressOptimal.node_top(block_length)
 		var $at = 0.U64
 		while $at != block_length {
-			item = List.get(node_item, $at) ?? 0
+			item = List.get(node_item, top.minus_wrap($at)) ?? 0
 			length = item.bitwise_and(CompressOptimal.optimum_len_mask).to_u64()
 			offset = item.shr_zf_wrap(CompressOptimal.optimum_offset_shift).to_u64()
 			if length == 1 {
@@ -939,18 +963,6 @@ CompressOptimal := [].{
 				lits.freqs_offset,
 			)?
 
-			# Make the block really end where it should, even though matches
-			# found near the end may reach past it.
-			var $stop = block_length
-			stop_end = (block_length - 1 + DeflateTables.max_match_len).min(CompressOptimal.optimum_nodes_size - 1)
-			while $stop <= stop_end {
-				$node_cost = match List.set($node_cost, $stop, 0x80000000) {
-					Ok(next) => next
-					Err(_) => return Err(CompressBug)
-				}
-				$stop = $stop + 1
-			}
-
 			# A static Huffman block is sometimes cheapest, especially a short
 			# one. When the block is short enough to be worth the time, find
 			# the best path under the static codes and remember what it costs.
@@ -976,7 +988,7 @@ CompressOptimal := [].{
 				)?
 				$node_cost = path.node_cost
 				$node_item = path.node_item
-				$static_cost = (List.get($node_cost, 0) ?? 0).to_u64() // CompressOptimal.bit_cost + 7
+				$static_cost = (List.get($node_cost, CompressOptimal.node_top(block_length)) ?? 0).to_u64() // CompressOptimal.bit_cost + 7
 			} else {
 			}
 
