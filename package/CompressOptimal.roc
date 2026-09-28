@@ -405,30 +405,27 @@ CompressOptimal := [].{
 	## is considered, which is what makes that scan linear in the number of
 	## matches rather than quadratic.
 	##
-	## The node tables hold node `n` at index `top - n` (see `node_top`), so
-	## the search writes them from low addresses upward and reads the nodes
-	## just below its write cursor, the direction the hardware prefetches.
+	## The node tables are appended in that same order, so node `n` sits at
+	## index `top - n` (see `node_top`): a position's node comes after every
+	## later position's, which is exactly what its cost scan reads. The tables
+	## keep their capacity from block to block and are never initialized.
 	find_min_cost_path : U64, List(U32), List(U32), U64, List(U32), List(U32), List(U32), List(U32), List(U32) -> Try(PathResult, [CompressBug])
 	find_min_cost_path = |block_length, cache_len, cache_off, cache_end, node_cost_0, node_item_0, cost_literal, cost_length, cost_offset_slot| {
 		top = CompressOptimal.node_top(block_length)
-		var $node_cost = node_cost_0
-		var $node_item = node_item_0
+		var $node_cost = List.clear(node_cost_0)
+		var $node_item = List.clear(node_item_0)
 
 		# Make the block really end where it should, even though matches found
 		# near the end may reach past it: every node past the end costs too
 		# much to ever be chosen.
 		var $guard = top
 		while $guard != block_length {
-			$node_cost = match List.set($node_cost, top.minus_wrap($guard), 0x80000000) {
-				Ok(next) => next
-				Err(_) => return Err(CompressBug)
-			}
+			$node_cost = List.append($node_cost, 0x80000000)
+			$node_item = List.append($node_item, 0)
 			$guard = $guard.minus_wrap(1)
 		}
-		$node_cost = match List.set($node_cost, top.minus_wrap(block_length), 0) {
-			Ok(next) => next
-			Err(_) => return Err(CompressBug)
-		}
+		$node_cost = List.append($node_cost, 0)
+		$node_item = List.append($node_item, 0)
 
 		# Wrapping arithmetic on the per-node path: the cursor and the cache
 		# pointer only step down while nonzero, a match never reaches past the
@@ -472,14 +469,8 @@ CompressOptimal := [].{
 			} else {
 			}
 
-			$node_cost = match List.set($node_cost, top.minus_wrap($cur), $best) {
-				Ok(next) => next
-				Err(_) => return Err(CompressBug)
-			}
-			$node_item = match List.set($node_item, top.minus_wrap($cur), $item) {
-				Ok(next) => next
-				Err(_) => return Err(CompressBug)
-			}
+			$node_cost = List.append($node_cost, $best)
+			$node_item = List.append($node_item, $item)
 		}
 
 		Ok({ node_cost: $node_cost, node_item: $node_item })
@@ -681,8 +672,8 @@ CompressOptimal := [].{
 		var $cache_len = List.repeat(0.U32, CompressOptimal.match_cache_size)
 		var $cache_off = List.repeat(0.U32, CompressOptimal.match_cache_size)
 		var $cache_ptr = 0.U64
-		var $node_cost = List.repeat(0.U32, CompressOptimal.optimum_nodes_size)
-		var $node_item = List.repeat(0.U32, CompressOptimal.optimum_nodes_size)
+		var $node_cost = List.with_capacity(CompressOptimal.optimum_nodes_size)
+		var $node_item = List.with_capacity(CompressOptimal.optimum_nodes_size)
 
 		var $cost_literal = List.repeat(0.U32, DeflateTables.num_literals)
 		var $cost_length = List.repeat(0.U32, DeflateTables.max_match_len + 1)
@@ -988,7 +979,7 @@ CompressOptimal := [].{
 				)?
 				$node_cost = path.node_cost
 				$node_item = path.node_item
-				$static_cost = (List.get($node_cost, CompressOptimal.node_top(block_length)) ?? 0).to_u64() // CompressOptimal.bit_cost + 7
+				$static_cost = (List.last($node_cost) ?? 0).to_u64() // CompressOptimal.bit_cost + 7
 			} else {
 			}
 
