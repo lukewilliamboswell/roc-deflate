@@ -67,11 +67,12 @@ Matchfinder := [].{
 		var $len = start_len
 
 		# Four word compares cover most matches. Each returns the match length
-		# as soon as its words differ, so the loop carries nothing but its
-		# counter and unrolls into straight compares.
-		if $len + 32 <= max_len {
-			var $step = 0.U64
-			while $step < 4 {
+		# as soon as its words differ, so the loop carries nothing but the
+		# length and unrolls into straight compares. The four words' end is a
+		# bound of its own so the compiler sees each read stay within it.
+		four_words_end = $len + 32
+		if four_words_end <= max_len {
+			while $len + 8 <= four_words_end {
 				s = U64.from_le_bytes(input, str_at.plus_wrap($len)) ?? 0
 				d = (U64.from_le_bytes(input, match_at.plus_wrap($len)) ?? 0).bitwise_xor(s)
 				if d != 0 {
@@ -79,7 +80,6 @@ Matchfinder := [].{
 				} else {
 				}
 				$len = $len.plus_wrap(8)
-				$step = $step.plus_wrap(1)
 			}
 		} else {
 		}

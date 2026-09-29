@@ -53,7 +53,10 @@ HtMatchfinder := [].{
 	## branch.
 	longest_match : List(U16), U64, U64, List(U8), U64, U64, U64 -> Try(Match, [CompressBug])
 	longest_match = |tab_0, base_0, hash_0, input, in_next, max_len, nice_len| {
-		if List.len(input) < 4 {
+		# The caller leaves at least the hash's bytes readable past the current
+		# position; stating that here lets the reads at and just past the
+		# position skip their bounds tests.
+		if in_next + max_len > List.len(input) or max_len < HtMatchfinder.required_nbytes {
 			return Err(CompressBug)
 		} else {
 		}
