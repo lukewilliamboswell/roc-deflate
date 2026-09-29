@@ -53,22 +53,27 @@ Matchfinder := [].{
 	## Whole words are compared at a time and the first differing word is
 	## located by its lowest set bit, so a mismatch costs one count rather than
 	## a byte loop. The caller guarantees `max_len` bytes are readable at both
-	## positions, which is what makes the word reads safe.
+	## positions; the entry test states that guarantee where the compiler can
+	## see it, and every word read below is then provably in bounds: each read
+	## index is `str_at + len` or `match_at + len` with `len + 8 <= max_len`,
+	## the string side stays within the tested `str_at + max_len`, and the
+	## match side sits below the string side.
 	lz_extend : List(U8), U64, U64, U64, U64 -> U64
 	lz_extend = |input, str_at, match_at, start_len, max_len| {
-		# Wrapping index arithmetic: a checked add would put an overflow branch
-		# ahead of every word read, and the reads' own bounds tests already
-		# reject any position that wrapped.
+		if str_at + max_len > List.len(input) or match_at >= str_at {
+			crash "lz_extend: match window outside the input"
+		} else {
+		}
 		var $len = start_len
 
 		# Four word compares cover most matches. Each returns the match length
 		# as soon as its words differ, so the loop carries nothing but its
 		# counter and unrolls into straight compares.
-		if max_len.minus_wrap($len) >= 32 {
+		if $len + 32 <= max_len {
 			var $step = 0.U64
 			while $step < 4 {
-				d = (U64.from_le_bytes(input, match_at.plus_wrap($len)) ?? 0)
-					.bitwise_xor(U64.from_le_bytes(input, str_at.plus_wrap($len)) ?? 0)
+				s = U64.from_le_bytes(input, str_at.plus_wrap($len)) ?? 0
+				d = (U64.from_le_bytes(input, match_at.plus_wrap($len)) ?? 0).bitwise_xor(s)
 				if d != 0 {
 					return $len.plus_wrap(d.count_trailing_zero_bits().to_u64().shr_zf_wrap(3))
 				} else {
@@ -79,9 +84,9 @@ Matchfinder := [].{
 		} else {
 		}
 
-		while $len.plus_wrap(8) <= max_len {
-			d = (U64.from_le_bytes(input, match_at.plus_wrap($len)) ?? 0)
-				.bitwise_xor(U64.from_le_bytes(input, str_at.plus_wrap($len)) ?? 0)
+		while $len + 8 <= max_len {
+			s = U64.from_le_bytes(input, str_at.plus_wrap($len)) ?? 0
+			d = (U64.from_le_bytes(input, match_at.plus_wrap($len)) ?? 0).bitwise_xor(s)
 			if d != 0 {
 				return $len.plus_wrap(d.count_trailing_zero_bits().to_u64().shr_zf_wrap(3))
 			} else {
@@ -90,7 +95,7 @@ Matchfinder := [].{
 		}
 
 		while $len < max_len
-			and (List.get(input, match_at.plus_wrap($len)) ?? 0) == (List.get(input, str_at.plus_wrap($len)) ?? 0) {
+			and (List.get(input, str_at.plus_wrap($len)) ?? 0) == (List.get(input, match_at.plus_wrap($len)) ?? 0) {
 			$len = $len.plus_wrap(1)
 		}
 		$len

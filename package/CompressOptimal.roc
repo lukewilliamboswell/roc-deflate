@@ -412,6 +412,12 @@ CompressOptimal := [].{
 	find_min_cost_path : U64, List(U32), List(U32), U64, List(U32), List(U32), List(U32), List(U32), List(U32) -> Try(PathResult, [CompressBug])
 	find_min_cost_path = |block_length, cache_len, cache_off, cache_end, node_cost_0, node_item_0, cost_literal, cost_length, cost_offset_slot| {
 		top = CompressOptimal.node_top(block_length)
+		# The length table has one cost per match length; stating its size here
+		# lets every per-length read below skip its bounds test.
+		if List.len(cost_length) < DeflateTables.max_match_len + 1 {
+			return Err(CompressBug)
+		} else {
+		}
 		var $node_cost = List.clear(node_cost_0)
 		var $node_item = List.clear(node_item_0)
 
@@ -426,6 +432,14 @@ CompressOptimal := [].{
 		}
 		$node_cost = List.append($node_cost, 0)
 		$node_item = List.append($node_item, 0)
+		# Node `n` lives at `List.len($node_cost) - (n - cur)` while the cursor
+		# is at `cur`, and a match reaches at most `max_match_len` nodes ahead,
+		# so the tables hold at least that many entries from here on: with that
+		# stated once, every node read below is provably in bounds.
+		if List.len($node_cost) < DeflateTables.max_match_len {
+			return Err(CompressBug)
+		} else {
+		}
 
 		# Wrapping arithmetic on the per-node path: the cursor and the cache
 		# pointer only step down while nonzero, a match never reaches past the
@@ -441,27 +455,39 @@ CompressOptimal := [].{
 			literal = (List.get(cache_off, $cp) ?? 0).to_u64()
 
 			# A literal is always available, so it seeds the comparison.
-			var $best = (List.get(cost_literal, literal) ?? 0).plus_wrap(List.get($node_cost, top.minus_wrap($cur.plus_wrap(1))) ?? 0)
+			var $best = (List.get(cost_literal, literal) ?? 0).plus_wrap(List.get($node_cost, List.len($node_cost).minus_wrap(1)) ?? 0)
 			var $item = literal.to_u32_wrap().shl_wrap(CompressOptimal.optimum_offset_shift).bitwise_or(1)
 
 			if num_matches != 0 {
 				var $m = $cp.minus_wrap(num_matches)
-				var $len = DeflateTables.min_match_len
+				var $k = 0.U64
 				while $m != $cp {
 					offset = (List.get(cache_off, $m) ?? 0).to_u64()
 					offset_cost = List.get(cost_offset_slot, DeflateTables.offset_slot(offset)) ?? 0
 					this_len = (List.get(cache_len, $m) ?? 0).to_u64()
-					while $len <= this_len {
+					# A cached match is between the minimum and maximum match
+					# lengths; stating that bounds every length tried below, so
+					# the per-length table reads skip their bounds tests.
+					if this_len > DeflateTables.max_match_len or this_len < DeflateTables.min_match_len {
+						return Err(CompressBug)
+					} else {
+					}
+					# Lengths run from the one after the previous match's up to
+					# this one's; the counter starts where the previous match left
+					# off so each length is costed once.
+					len_count = this_len - (DeflateTables.min_match_len - 1)
+					while $k < len_count {
+						len = $k.plus_wrap(DeflateTables.min_match_len)
 						cost_to_end = offset_cost
-							.plus_wrap(List.get(cost_length, $len) ?? 0)
-							.plus_wrap(List.get($node_cost, top.minus_wrap($cur.plus_wrap($len))) ?? 0)
+							.plus_wrap(List.get(cost_length, len) ?? 0)
+							.plus_wrap(List.get($node_cost, List.len($node_cost).minus_wrap(len)) ?? 0)
 						if cost_to_end < $best {
 							$best = cost_to_end
-							$item = $len.to_u32_wrap()
+							$item = len.to_u32_wrap()
 								.bitwise_or(offset.to_u32_wrap().shl_wrap(CompressOptimal.optimum_offset_shift))
 						} else {
 						}
-						$len = $len.plus_wrap(1)
+						$k = $k.plus_wrap(1)
 					}
 					$m = $m.plus_wrap(1)
 				}
