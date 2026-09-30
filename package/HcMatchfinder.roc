@@ -70,10 +70,14 @@ HcMatchfinder := [].{
 	## so the tables never cross this call as owned values: three large lists
 	## handed back in a record would cost a retain and a release apiece on every
 	## position, and this is the innermost per-position call.
-	longest_match : List(U16), U16, U16, U64, List(U8), U64, U64, U64, U64, U64 -> Try(Match, [CompressBug])
+	longest_match : List(U16), U16, U16, U64, List(U8), U64, U64, U64, U64, U64 -> Match
 	longest_match = |tab, cur_node3, cur_node4, in_base, input, in_next, best_len_in, max_len, nice_len, max_search_depth| {
+		# The caller never asks for a match past the input, so this test never
+		# fails; it exists so a plain record comes back rather than a `Try`
+		# whose tag every caller would inspect per position.
+		expect List.len(input) >= 4
 		if List.len(input) < 4 {
-			return Err(CompressBug)
+			return { length: 0, offset: 0 }
 		} else {
 		}
 		# The chain region is one window long, so every masked chain index is
@@ -205,13 +209,17 @@ HcMatchfinder := [].{
 			}
 		}
 
-		Ok({ length: $best_len, offset: in_next.minus_wrap($best_match_at) })
+		{ length: $best_len, offset: in_next.minus_wrap($best_match_at) }
 	}
 
 	## Insert `count` positions into the tables without searching them.
 	skip_bytes : List(U16), U64, U64, U64, List(U8), U64, U64, U64 -> Try(State, [CompressBug])
 	skip_bytes = |tab_0, base_0, nh3_0, nh4_0, input, in_next0, in_end, count| {
-		if count.plus_wrap(5) > in_end.minus_wrap(in_next0) {
+		# The run and the four bytes hashed past it stay inside the input;
+		# stated against the input's own length, that lets the hash read on
+		# every skipped byte drop its bounds test.
+		end = in_next0.plus_wrap(count)
+		if end.plus_wrap(5) > in_end or in_end > List.len(input) {
 			Ok({
 				tab: tab_0,
 				in_cur_base: base_0,
@@ -247,8 +255,7 @@ HcMatchfinder := [].{
 			var $in_next = in_next0
 			var $hash3 = nh3_0
 			var $hash4 = nh4_0
-			var $remaining = count
-			while $remaining > 0 {
+			while $in_next < end {
 				pos = $cur_pos.plus_wrap(Matchfinder.node_bias.to_i64_wrap()).to_u16_wrap()
 				slot = $cur_pos.to_u64_wrap().bitwise_and(32767)
 				prev_head = List.get($tab, HcMatchfinder.hash4_base.plus_wrap($hash4)) ?? 0
@@ -269,7 +276,6 @@ HcMatchfinder := [].{
 				$hash3 = Matchfinder.lz_hash(next_hashseq.bitwise_and(0xFFFFFF), HcMatchfinder.hash3_order)
 				$hash4 = Matchfinder.lz_hash(next_hashseq, HcMatchfinder.hash4_order)
 				$cur_pos = $cur_pos.plus_wrap(1)
-				$remaining = $remaining.minus_wrap(1)
 			}
 			Ok({
 				tab: $tab,
