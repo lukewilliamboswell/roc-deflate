@@ -734,18 +734,137 @@ CompressLazy := [].{
 					next_hashseq = U32.from_le_bytes(input, $in_next.plus_wrap(1)) ?? 0
 					$nh3 = Matchfinder.lz_hash(next_hashseq.bitwise_and(0xFFFFFF), HcMatchfinder.hash3_order)
 					$nh4 = Matchfinder.lz_hash(next_hashseq, HcMatchfinder.hash4_order)
-					$found = HcMatchfinder.longest_match(
-						$mf,
-						cur_node3,
-						cur_node4,
-						$base,
-						input,
-						$in_next,
-						$min_len.minus_wrap(1),
-						$max_len,
-						$nice_len,
-						params.max_search_depth,
-					)
+					# The hash-chain search, written out here rather than called, so the
+					# loop's state stays in registers across it.
+					# The chain region is one window long, so every masked chain index is
+					# in range, and a length guard here would let each chain read's bounds
+					# test fold away. It is deliberately absent: the test costs nothing on
+					# the walk's critical path, while its survival keeps the masked index
+					# as a separate value that the load then scales for free. Folded, the
+					# mask and scale merge into one instruction ahead of the load, which
+					# is a cycle more on every step of the chain.
+					# A node at or below the current position, in the biased space the
+					# tables use, is out of the window.
+
+					var $best_len_s = $min_len.minus_wrap(1)
+					var $best_match_at_s = $in_next
+
+					seq4_s = U32.from_le_bytes(input, $in_next) ?? 0
+					var $node4_s = cur_node4
+					var $depth_s = params.max_search_depth
+					var $done_s = 0.U64
+
+					if $best_len_s < 4 {
+						if cur_node3.to_u64() <= cur_pos {
+							$done_s = 1
+						} else {
+							if $best_len_s < 3 {
+								match_at_s = Matchfinder.node_index($base, cur_node3)
+								if (U32.from_le_bytes(input, match_at_s) ?? 0).bitwise_and(0xFFFFFF)
+									== seq4_s.bitwise_and(0xFFFFFF) {
+									$best_len_s = 3
+									$best_match_at_s = match_at_s
+								} else {
+								}
+							} else {
+							}
+
+							if $node4_s.to_u64() <= cur_pos {
+								$done_s = 1
+							} else {
+								# Walk the chain until four bytes agree.
+								var $found_at_s = 0.U64
+								while True {
+									match_at_s = Matchfinder.node_index($base, $node4_s)
+									if (U32.from_le_bytes(input, match_at_s) ?? 0) == seq4_s {
+										$found_at_s = match_at_s
+										break
+									} else {
+									}
+									$node4_s = List.get($mf, $node4_s.to_u64().bitwise_and(32767)) ?? 0
+									$depth_s = $depth_s.minus_wrap(1)
+									if $node4_s.to_u64() <= cur_pos or $depth_s == 0 {
+										$done_s = 1
+										break
+									} else {
+									}
+								}
+
+								if $done_s == 0 {
+									$best_match_at_s = $found_at_s
+									$best_len_s = Matchfinder.lz_extend(input, $in_next, $found_at_s, 4, $max_len)
+									if $best_len_s >= $nice_len {
+										$done_s = 1
+									} else {
+										$node4_s = List.get($mf, $node4_s.to_u64().bitwise_and(32767)) ?? 0
+										$depth_s = $depth_s.minus_wrap(1)
+										if $node4_s.to_u64() <= cur_pos or $depth_s == 0 {
+											$done_s = 1
+										} else {
+										}
+									}
+								} else {
+								}
+							}
+						}
+					} else {
+						if $node4_s.to_u64() <= cur_pos or $best_len_s >= $nice_len {
+							$done_s = 1
+						} else {
+						}
+					}
+
+					# Now look only for matches longer than the one in hand.
+					while $done_s == 0 {
+						var $cand_at_s = 0.U64
+						while True {
+							match_at_s = Matchfinder.node_index($base, $node4_s)
+							# The four bytes ending just past the current best length
+							# are what a longer match must agree on, so check them
+							# before anything else.
+							# Wrapping arithmetic: positions are far below 2^63, and a checked
+							# add or subtract would put an overflow branch on every candidate.
+							if (U32.from_le_bytes(input, match_at_s.plus_wrap($best_len_s).minus_wrap(3)) ?? 0)
+								== (U32.from_le_bytes(input, $in_next.plus_wrap($best_len_s).minus_wrap(3)) ?? 0)
+								and (U32.from_le_bytes(input, match_at_s) ?? 0) == seq4_s {
+								$cand_at_s = match_at_s
+								break
+							} else {
+							}
+							$node4_s = List.get($mf, $node4_s.to_u64().bitwise_and(32767)) ?? 0
+							$depth_s = $depth_s.minus_wrap(1)
+							if $node4_s.to_u64() <= cur_pos or $depth_s == 0 {
+								$done_s = 1
+								break
+							} else {
+							}
+						}
+
+						if $done_s == 0 {
+							len_s = Matchfinder.lz_extend(input, $in_next, $cand_at_s, 4, $max_len)
+							if len_s > $best_len_s {
+								$best_len_s = len_s
+								$best_match_at_s = $cand_at_s
+								if $best_len_s >= $nice_len {
+									$done_s = 1
+								} else {
+								}
+							} else {
+							}
+							if $done_s == 0 {
+								$node4_s = List.get($mf, $node4_s.to_u64().bitwise_and(32767)) ?? 0
+								$depth_s = $depth_s.minus_wrap(1)
+								if $node4_s.to_u64() <= cur_pos or $depth_s == 0 {
+									$done_s = 1
+								} else {
+								}
+							} else {
+							}
+						} else {
+						}
+					}
+
+					$found = { length: $best_len_s, offset: $in_next.minus_wrap($best_match_at_s) }
 				}
 
 				if $found.length < $min_len
@@ -822,18 +941,137 @@ CompressLazy := [].{
 								next_hashseq = U32.from_le_bytes(input, $in_next.plus_wrap(1)) ?? 0
 								$nh3 = Matchfinder.lz_hash(next_hashseq.bitwise_and(0xFFFFFF), HcMatchfinder.hash3_order)
 								$nh4 = Matchfinder.lz_hash(next_hashseq, HcMatchfinder.hash4_order)
-								$nxt = HcMatchfinder.longest_match(
-									$mf,
-									cur_node3,
-									cur_node4,
-									$base,
-									input,
-									$in_next,
-									$cur_len.minus_wrap(1),
-									$max_len,
-									$nice_len,
-									params.max_search_depth.shr_zf_wrap(1),
-								)
+								# The hash-chain search, written out here rather than called, so the
+								# loop's state stays in registers across it.
+								# The chain region is one window long, so every masked chain index is
+								# in range, and a length guard here would let each chain read's bounds
+								# test fold away. It is deliberately absent: the test costs nothing on
+								# the walk's critical path, while its survival keeps the masked index
+								# as a separate value that the load then scales for free. Folded, the
+								# mask and scale merge into one instruction ahead of the load, which
+								# is a cycle more on every step of the chain.
+								# A node at or below the current position, in the biased space the
+								# tables use, is out of the window.
+
+								var $best_len_n = $cur_len.minus_wrap(1)
+								var $best_match_at_n = $in_next
+
+								seq4_n = U32.from_le_bytes(input, $in_next) ?? 0
+								var $node4_n = cur_node4
+								var $depth_n = params.max_search_depth.shr_zf_wrap(1)
+								var $done_n = 0.U64
+
+								if $best_len_n < 4 {
+									if cur_node3.to_u64() <= cur_pos {
+										$done_n = 1
+									} else {
+										if $best_len_n < 3 {
+											match_at_n = Matchfinder.node_index($base, cur_node3)
+											if (U32.from_le_bytes(input, match_at_n) ?? 0).bitwise_and(0xFFFFFF)
+												== seq4_n.bitwise_and(0xFFFFFF) {
+												$best_len_n = 3
+												$best_match_at_n = match_at_n
+											} else {
+											}
+										} else {
+										}
+
+										if $node4_n.to_u64() <= cur_pos {
+											$done_n = 1
+										} else {
+											# Walk the chain until four bytes agree.
+											var $found_at_n = 0.U64
+											while True {
+												match_at_n = Matchfinder.node_index($base, $node4_n)
+												if (U32.from_le_bytes(input, match_at_n) ?? 0) == seq4_n {
+													$found_at_n = match_at_n
+													break
+												} else {
+												}
+												$node4_n = List.get($mf, $node4_n.to_u64().bitwise_and(32767)) ?? 0
+												$depth_n = $depth_n.minus_wrap(1)
+												if $node4_n.to_u64() <= cur_pos or $depth_n == 0 {
+													$done_n = 1
+													break
+												} else {
+												}
+											}
+
+											if $done_n == 0 {
+												$best_match_at_n = $found_at_n
+												$best_len_n = Matchfinder.lz_extend(input, $in_next, $found_at_n, 4, $max_len)
+												if $best_len_n >= $nice_len {
+													$done_n = 1
+												} else {
+													$node4_n = List.get($mf, $node4_n.to_u64().bitwise_and(32767)) ?? 0
+													$depth_n = $depth_n.minus_wrap(1)
+													if $node4_n.to_u64() <= cur_pos or $depth_n == 0 {
+														$done_n = 1
+													} else {
+													}
+												}
+											} else {
+											}
+										}
+									}
+								} else {
+									if $node4_n.to_u64() <= cur_pos or $best_len_n >= $nice_len {
+										$done_n = 1
+									} else {
+									}
+								}
+
+								# Now look only for matches longer than the one in hand.
+								while $done_n == 0 {
+									var $cand_at_n = 0.U64
+									while True {
+										match_at_n = Matchfinder.node_index($base, $node4_n)
+										# The four bytes ending just past the current best length
+										# are what a longer match must agree on, so check them
+										# before anything else.
+										# Wrapping arithmetic: positions are far below 2^63, and a checked
+										# add or subtract would put an overflow branch on every candidate.
+										if (U32.from_le_bytes(input, match_at_n.plus_wrap($best_len_n).minus_wrap(3)) ?? 0)
+											== (U32.from_le_bytes(input, $in_next.plus_wrap($best_len_n).minus_wrap(3)) ?? 0)
+											and (U32.from_le_bytes(input, match_at_n) ?? 0) == seq4_n {
+											$cand_at_n = match_at_n
+											break
+										} else {
+										}
+										$node4_n = List.get($mf, $node4_n.to_u64().bitwise_and(32767)) ?? 0
+										$depth_n = $depth_n.minus_wrap(1)
+										if $node4_n.to_u64() <= cur_pos or $depth_n == 0 {
+											$done_n = 1
+											break
+										} else {
+										}
+									}
+
+									if $done_n == 0 {
+										len_n = Matchfinder.lz_extend(input, $in_next, $cand_at_n, 4, $max_len)
+										if len_n > $best_len_n {
+											$best_len_n = len_n
+											$best_match_at_n = $cand_at_n
+											if $best_len_n >= $nice_len {
+												$done_n = 1
+											} else {
+											}
+										} else {
+										}
+										if $done_n == 0 {
+											$node4_n = List.get($mf, $node4_n.to_u64().bitwise_and(32767)) ?? 0
+											$depth_n = $depth_n.minus_wrap(1)
+											if $node4_n.to_u64() <= cur_pos or $depth_n == 0 {
+												$done_n = 1
+											} else {
+											}
+										} else {
+										}
+									} else {
+									}
+								}
+
+								$nxt = { length: $best_len_n, offset: $in_next.minus_wrap($best_match_at_n) }
 							}
 							$in_next = $in_next.plus_wrap(1)
 
@@ -899,18 +1137,137 @@ CompressLazy := [].{
 									next_hashseq = U32.from_le_bytes(input, $in_next.plus_wrap(1)) ?? 0
 									$nh3 = Matchfinder.lz_hash(next_hashseq.bitwise_and(0xFFFFFF), HcMatchfinder.hash3_order)
 									$nh4 = Matchfinder.lz_hash(next_hashseq, HcMatchfinder.hash4_order)
-									$nxt2 = HcMatchfinder.longest_match(
-										$mf,
-										cur_node3,
-										cur_node4,
-										$base,
-										input,
-										$in_next,
-										$cur_len.minus_wrap(1),
-										$max_len,
-										$nice_len,
-										params.max_search_depth.shr_zf_wrap(2),
-									)
+									# The hash-chain search, written out here rather than called, so the
+									# loop's state stays in registers across it.
+									# The chain region is one window long, so every masked chain index is
+									# in range, and a length guard here would let each chain read's bounds
+									# test fold away. It is deliberately absent: the test costs nothing on
+									# the walk's critical path, while its survival keeps the masked index
+									# as a separate value that the load then scales for free. Folded, the
+									# mask and scale merge into one instruction ahead of the load, which
+									# is a cycle more on every step of the chain.
+									# A node at or below the current position, in the biased space the
+									# tables use, is out of the window.
+
+									var $best_len_m = $cur_len.minus_wrap(1)
+									var $best_match_at_m = $in_next
+
+									seq4_m = U32.from_le_bytes(input, $in_next) ?? 0
+									var $node4_m = cur_node4
+									var $depth_m = params.max_search_depth.shr_zf_wrap(2)
+									var $done_m = 0.U64
+
+									if $best_len_m < 4 {
+										if cur_node3.to_u64() <= cur_pos {
+											$done_m = 1
+										} else {
+											if $best_len_m < 3 {
+												match_at_m = Matchfinder.node_index($base, cur_node3)
+												if (U32.from_le_bytes(input, match_at_m) ?? 0).bitwise_and(0xFFFFFF)
+													== seq4_m.bitwise_and(0xFFFFFF) {
+													$best_len_m = 3
+													$best_match_at_m = match_at_m
+												} else {
+												}
+											} else {
+											}
+
+											if $node4_m.to_u64() <= cur_pos {
+												$done_m = 1
+											} else {
+												# Walk the chain until four bytes agree.
+												var $found_at_m = 0.U64
+												while True {
+													match_at_m = Matchfinder.node_index($base, $node4_m)
+													if (U32.from_le_bytes(input, match_at_m) ?? 0) == seq4_m {
+														$found_at_m = match_at_m
+														break
+													} else {
+													}
+													$node4_m = List.get($mf, $node4_m.to_u64().bitwise_and(32767)) ?? 0
+													$depth_m = $depth_m.minus_wrap(1)
+													if $node4_m.to_u64() <= cur_pos or $depth_m == 0 {
+														$done_m = 1
+														break
+													} else {
+													}
+												}
+
+												if $done_m == 0 {
+													$best_match_at_m = $found_at_m
+													$best_len_m = Matchfinder.lz_extend(input, $in_next, $found_at_m, 4, $max_len)
+													if $best_len_m >= $nice_len {
+														$done_m = 1
+													} else {
+														$node4_m = List.get($mf, $node4_m.to_u64().bitwise_and(32767)) ?? 0
+														$depth_m = $depth_m.minus_wrap(1)
+														if $node4_m.to_u64() <= cur_pos or $depth_m == 0 {
+															$done_m = 1
+														} else {
+														}
+													}
+												} else {
+												}
+											}
+										}
+									} else {
+										if $node4_m.to_u64() <= cur_pos or $best_len_m >= $nice_len {
+											$done_m = 1
+										} else {
+										}
+									}
+
+									# Now look only for matches longer than the one in hand.
+									while $done_m == 0 {
+										var $cand_at_m = 0.U64
+										while True {
+											match_at_m = Matchfinder.node_index($base, $node4_m)
+											# The four bytes ending just past the current best length
+											# are what a longer match must agree on, so check them
+											# before anything else.
+											# Wrapping arithmetic: positions are far below 2^63, and a checked
+											# add or subtract would put an overflow branch on every candidate.
+											if (U32.from_le_bytes(input, match_at_m.plus_wrap($best_len_m).minus_wrap(3)) ?? 0)
+												== (U32.from_le_bytes(input, $in_next.plus_wrap($best_len_m).minus_wrap(3)) ?? 0)
+												and (U32.from_le_bytes(input, match_at_m) ?? 0) == seq4_m {
+												$cand_at_m = match_at_m
+												break
+											} else {
+											}
+											$node4_m = List.get($mf, $node4_m.to_u64().bitwise_and(32767)) ?? 0
+											$depth_m = $depth_m.minus_wrap(1)
+											if $node4_m.to_u64() <= cur_pos or $depth_m == 0 {
+												$done_m = 1
+												break
+											} else {
+											}
+										}
+
+										if $done_m == 0 {
+											len_m = Matchfinder.lz_extend(input, $in_next, $cand_at_m, 4, $max_len)
+											if len_m > $best_len_m {
+												$best_len_m = len_m
+												$best_match_at_m = $cand_at_m
+												if $best_len_m >= $nice_len {
+													$done_m = 1
+												} else {
+												}
+											} else {
+											}
+											if $done_m == 0 {
+												$node4_m = List.get($mf, $node4_m.to_u64().bitwise_and(32767)) ?? 0
+												$depth_m = $depth_m.minus_wrap(1)
+												if $node4_m.to_u64() <= cur_pos or $depth_m == 0 {
+													$done_m = 1
+												} else {
+												}
+											} else {
+											}
+										} else {
+										}
+									}
+
+									$nxt2 = { length: $best_len_m, offset: $in_next.minus_wrap($best_match_at_m) }
 								}
 								$in_next = $in_next.plus_wrap(1)
 
