@@ -279,7 +279,9 @@ CompressLazy := [].{
 		var $nh4 = 0.U64
 		# One allocation for the whole stream: a block appends its sequences and
 		# the run terminator, and clearing the list afterwards keeps the capacity.
-		var $seqs = List.with_capacity(CompressLazy.seq_store_length + 1)
+		# A block holds at most one sequence per input byte, so a short input
+		# needs no more than that.
+		var $seqs = List.with_capacity(CompressLazy.seq_store_length.min(in_end) + 1)
 
 		var $blocking = 1.U64
 		while $blocking == 1 {
@@ -661,7 +663,9 @@ CompressLazy := [].{
 		var $nh4 = 0.U64
 		# One allocation for the whole stream: a block appends its sequences and
 		# the run terminator, and clearing the list afterwards keeps the capacity.
-		var $seqs = List.with_capacity(CompressLazy.seq_store_length + 1)
+		# A block holds at most one sequence per input byte, so a short input
+		# needs no more than that.
+		var $seqs = List.with_capacity(CompressLazy.seq_store_length.min(in_end) + 1)
 
 		var $blocking = 1.U64
 		while $blocking == 1 {
@@ -906,15 +910,18 @@ CompressLazy := [].{
 					var $cur_len = $found.length
 					var $cur_offset = $found.offset
 
-					# Hold the match while looking for a better one just ahead.
+					# Hold the match while looking for a better one just ahead. The
+					# loop only decides which match to take and how far to skip past
+					# it; the match is recorded after the loop.
+					# TODO(roc-lang/roc#11933): recording it inside the loop, after
+					# the `if` that chooses it, made `--opt=dev` builds copy the
+					# frequency tables and the matchfinder table once per match.
 					var $matching = 1.U64
+					var $skip_after = 0.U64
 					while $matching == 1 {
-						var $emit = 0.U64
-						var $skip_after = 0.U64
-
 						if $cur_len >= $nice_len {
 							# Long enough that looking further cannot pay.
-							$emit = 1
+							$matching = 0
 							$skip_after = $cur_len.minus_wrap(1)
 						} else {
 							remaining1 = in_end.minus_wrap($in_next)
@@ -1324,55 +1331,52 @@ CompressLazy := [].{
 									$cur_len = $nxt2.length
 									$cur_offset = $nxt2.offset
 								} else {
-									$emit = 1
+									$matching = 0
 									$skip_after = if $cur_len > 3 { $cur_len.minus_wrap(3) } else { 0 }
 								}
 							} else {
-								$emit = 1
+								$matching = 0
 								$skip_after = $cur_len.minus_wrap(2)
 							}
 						}
 
-						if $emit == 1 {
-							length_slot = DeflateTables.length_slot($cur_len)
-							offset_slot = DeflateTables.offset_slot($cur_offset)
-							litlen_sym = DeflateTables.first_len_sym.plus_wrap(length_slot)
-							litlen_sym_count = (List.get($freqs_litlen, litlen_sym) ?? 0).plus_wrap(1)
-							$freqs_litlen = match List.set($freqs_litlen, litlen_sym, litlen_sym_count) {
-								Ok(next) => next
-								Err(_) => return Err(CompressBug)
-							}
-							offset_slot_count = (List.get($freqs_offset, offset_slot) ?? 0).plus_wrap(1)
-							$freqs_offset = match List.set($freqs_offset, offset_slot, offset_slot_count) {
-								Ok(next) => next
-								Err(_) => return Err(CompressBug)
-							}
-							obs = if $cur_len >= 9 { 9 } else { 8 }
-							obs_count = (List.get($new_observations, obs) ?? 0).plus_wrap(1)
-							$new_observations = match List.set($new_observations, obs, obs_count) {
-								Ok(next) => next
-								Err(_) => return Err(CompressBug)
-							}
-							$num_new_observations = $num_new_observations.plus_wrap(1)
-							$seqs = List.append($seqs, {
-								litrunlen_and_length: $litrunlen.bitwise_or($cur_len.to_u32_wrap().shl_wrap(BlockOut.seq_length_shift)),
-								offset: $cur_offset.to_u16_wrap(),
-								offset_slot: offset_slot.to_u16_wrap(),
-							})
-							$litrunlen = 0
+					}
 
-							if $skip_after > 0 {
-								skipped = HcMatchfinder.skip_bytes($mf, $base, $nh3, $nh4, input, $in_next, in_end, $skip_after)?
-								$mf = skipped.tab
-								$base = skipped.in_cur_base
-								$nh3 = skipped.next_hash3
-								$nh4 = skipped.next_hash4
-								$in_next = $in_next.plus_wrap($skip_after)
-							} else {
-							}
-							$matching = 0
-						} else {
-						}
+					# Record the match and insert the positions it covers.
+					length_slot = DeflateTables.length_slot($cur_len)
+					offset_slot = DeflateTables.offset_slot($cur_offset)
+					litlen_sym = DeflateTables.first_len_sym.plus_wrap(length_slot)
+					litlen_sym_count = (List.get($freqs_litlen, litlen_sym) ?? 0).plus_wrap(1)
+					$freqs_litlen = match List.set($freqs_litlen, litlen_sym, litlen_sym_count) {
+						Ok(next) => next
+						Err(_) => return Err(CompressBug)
+					}
+					offset_slot_count = (List.get($freqs_offset, offset_slot) ?? 0).plus_wrap(1)
+					$freqs_offset = match List.set($freqs_offset, offset_slot, offset_slot_count) {
+						Ok(next) => next
+						Err(_) => return Err(CompressBug)
+					}
+					obs = if $cur_len >= 9 { 9 } else { 8 }
+					obs_count = (List.get($new_observations, obs) ?? 0).plus_wrap(1)
+					$new_observations = match List.set($new_observations, obs, obs_count) {
+						Ok(next) => next
+						Err(_) => return Err(CompressBug)
+					}
+					$num_new_observations = $num_new_observations.plus_wrap(1)
+					$seqs = List.append($seqs, {
+						litrunlen_and_length: $litrunlen.bitwise_or($cur_len.to_u32_wrap().shl_wrap(BlockOut.seq_length_shift)),
+						offset: $cur_offset.to_u16_wrap(),
+						offset_slot: offset_slot.to_u16_wrap(),
+					})
+					$litrunlen = 0
+					if $skip_after > 0 {
+						skipped = HcMatchfinder.skip_bytes($mf, $base, $nh3, $nh4, input, $in_next, in_end, $skip_after)?
+						$mf = skipped.tab
+						$base = skipped.in_cur_base
+						$nh3 = skipped.next_hash3
+						$nh4 = skipped.next_hash4
+						$in_next = $in_next.plus_wrap($skip_after)
+					} else {
 					}
 				}
 
