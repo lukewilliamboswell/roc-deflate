@@ -34,11 +34,11 @@ main! = |_| {
 }
 
 # Build a .roc file to a named binary with the LLVM speed backend.
-build! : Str, Str => Try({}, [Exit(I32), ..])
+build! : Str, Str => Try({}, [Exit(I32)])
 build! = |src, out| run!("roc", ["build", "--opt=speed", src, "--output=${out}"])
 
 # Run a command with inherited stdio, failing the script on a nonzero exit.
-run! : Str, List(Str) => Try({}, [Exit(I32), ..])
+run! : Str, List(Str) => Try({}, [Exit(I32)])
 run! = |program, arguments| {
 	Cmd.exec!(OsStr.from_str(program), arguments.map(OsStr.from_str)) ? |_| Exit(1)
 	Ok({})

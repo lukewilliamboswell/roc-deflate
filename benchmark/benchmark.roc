@@ -60,7 +60,7 @@ main! = |args| {
 	run_all!(dir, names)
 }
 
-run_all! : Path.Path, List(Str) => Try({}, [Exit(I32), StdoutErr(IOErr), ..])
+run_all! : Path.Path, List(Str) => Try({}, [Exit(I32), StdoutErr(IOErr)])
 run_all! = |dir, remaining|
 	match remaining {
 		[] => Ok({})
@@ -70,7 +70,7 @@ run_all! = |dir, remaining|
 		}
 	}
 
-run_one! : Path.Path, Str => Try({}, [Exit(I32), StdoutErr(IOErr), ..])
+run_one! : Path.Path, Str => Try({}, [Exit(I32), StdoutErr(IOErr)])
 run_one! = |dir, name| {
 	bytes = Path.read_bytes!(dir.join(name)) ? |_| Exit(1)
 	report!(name, "fastest", bytes, 1)?
@@ -79,7 +79,7 @@ run_one! = |dir, name| {
 }
 
 ## Time both directions at one level and print the two rows.
-report! : Str, Str, List(U8), U64 => Try({}, [Exit(I32), StdoutErr(IOErr), ..])
+report! : Str, Str, List(U8), U64 => Try({}, [Exit(I32), StdoutErr(IOErr)])
 report! = |name, setting, bytes, level| {
 	orig = bytes.len()
 	compressed = Deflate.compress(bytes, level) ? |_| Exit(1)
@@ -96,7 +96,7 @@ report! = |name, setting, bytes, level| {
 	row!(name, "decomp", setting, orig, comp, dt)
 }
 
-row! : Str, Str, Str, U64, U64, Timing => Try({}, [StdoutErr(IOErr), ..])
+row! : Str, Str, Str, U64, U64, Timing => Try({}, [StdoutErr(IOErr)])
 row! = |name, op, setting, orig, comp, t|
 	Stdout.line!("${name}\troc-deflate\t${op}\t${setting}\t${orig.to_str()}\t${comp.to_str()}\t${t.best_ns.to_str()}\t${t.iters.to_str()}")
 

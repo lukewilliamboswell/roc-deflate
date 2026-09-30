@@ -69,7 +69,7 @@ main! = |args| {
 
 # Compress and then decompress with our own code, and confirm the bytes come
 # back unchanged.
-check_roundtrip! : List(U8), U64 => Try({}, [Exit(I32), StdoutErr(IOErr), ..])
+check_roundtrip! : List(U8), U64 => Try({}, [Exit(I32), StdoutErr(IOErr)])
 check_roundtrip! = |corpus, level| {
 	deflated = Deflate.compress(corpus, level) ? |_| Exit(1)
 	back = Deflate.decompress(deflated) ? |_| Exit(1)
@@ -83,7 +83,7 @@ check_roundtrip! = |corpus, level| {
 
 # Compress with our encoder, wrap in a gzip member, and confirm real gzip
 # decodes it back to the exact corpus.
-check_forward! : List(U8), Path.Path, Str, U64 => Try({}, [Exit(I32), StdoutErr(IOErr), ..])
+check_forward! : List(U8), Path.Path, Str, U64 => Try({}, [Exit(I32), StdoutErr(IOErr)])
 check_forward! = |corpus, tmp, name, level| {
 	deflated = Deflate.compress(corpus, level) ? |_| Exit(1)
 	container = gzip_wrap(deflated, Crc32.checksum(corpus), corpus.len())
@@ -109,7 +109,7 @@ check_forward! = |corpus, tmp, name, level| {
 
 # Compress the corpus with real gzip, strip the container, and confirm our
 # decompressor reproduces the corpus from the raw DEFLATE stream.
-check_reverse! : List(U8), OsStr, Str => Try({}, [Exit(I32), StdoutErr(IOErr), ..])
+check_reverse! : List(U8), OsStr, Str => Try({}, [Exit(I32), StdoutErr(IOErr)])
 check_reverse! = |corpus, corpus_os, level| {
 	res = Cmd.new(OsStr.from_str("gzip")).args([OsStr.from_str("-n"), OsStr.from_str(level), OsStr.from_str("-c"), corpus_os]).exec_output_bytes!() ? |_| Exit(1)
 	# gzip member: 10-byte header, raw DEFLATE, then CRC32 + length (8 bytes).

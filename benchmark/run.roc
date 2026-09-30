@@ -54,7 +54,7 @@ main! = |_| {
 }
 
 # Ensure every corpus file is present, fetching the missing ones.
-ensure_all! : List({ name : Str, sha : Str }) => Try({}, [Exit(I32), StdoutErr(IOErr), ..])
+ensure_all! : List({ name : Str, sha : Str }) => Try({}, [Exit(I32), StdoutErr(IOErr)])
 ensure_all! = |remaining|
 	match remaining {
 		[] => Ok({})
@@ -65,7 +65,7 @@ ensure_all! = |remaining|
 	}
 
 # Download, verify, and extract one file unless it is already extracted.
-ensure_one! : { name : Str, sha : Str } => Try({}, [Exit(I32), StdoutErr(IOErr), ..])
+ensure_one! : { name : Str, sha : Str } => Try({}, [Exit(I32), StdoutErr(IOErr)])
 ensure_one! = |{ name, sha }| {
 	extracted = Path.from_os_str(OsStr.from_str("${corpus_dir}/${name}"))
 	if Path.is_file!(extracted) ? |_| Exit(1) {
@@ -86,7 +86,7 @@ ensure_one! = |{ name, sha }| {
 }
 
 # Run a command with inherited stdio, failing the script on a nonzero exit.
-run! : Str, List(Str) => Try({}, [Exit(I32), ..])
+run! : Str, List(Str) => Try({}, [Exit(I32)])
 run! = |program, arguments| {
 	Cmd.exec!(OsStr.from_str(program), arguments.map(OsStr.from_str)) ? |_| Exit(1)
 	Ok({})
