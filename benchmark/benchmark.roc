@@ -37,14 +37,27 @@ import deflate.Deflate
 
 # The 12 Silesia files, in the corpus's canonical order.
 names = [
-	"dickens", "mozilla", "mr", "nci", "ooffice", "osdb",
-	"reymont", "samba", "sao", "webster", "x-ray", "xml",
+	"dickens",
+	"mozilla",
+	"mr",
+	"nci",
+	"ooffice",
+	"osdb",
+	"reymont",
+	"samba",
+	"sao",
+	"webster",
+	"x-ray",
+	"xml",
 ]
 
 # The same budget cbench uses by default.
 min_iters = 5
+
 min_ns = 400_000_000
+
 max_ns = 8_000_000_000
+
 max_iters = 200
 
 Timing : { best_ns : U128, iters : U64 }
@@ -87,7 +100,11 @@ report! = |name, setting, bytes, level| {
 
 	# Verify before reporting: a fast wrong answer is not a result.
 	round_tripped = Deflate.decompress(compressed) ? |_| Exit(1)
-	verified = if round_tripped == bytes { Ok({}) } else { Err(Exit(1)) }
+	verified = if round_tripped == bytes {
+		Ok({})
+	} else {
+		Err(Exit(1))
+	}
 	verified?
 
 	ct = time_compress!(bytes, level)
@@ -127,7 +144,11 @@ compress_loop! = |bytes, level, sink, best, elapsed, iters|
 		produced = compressed_len(out)
 		finish = Utc.now!()
 		took = Utc.delta_as_nanos(finish, start)
-		next_best = if iters == 0 or took < best { took } else { best }
+		next_best = if iters == 0 or took < best {
+			took
+		} else {
+			best
+		}
 		compress_loop!(bytes, level, sink + produced, next_best, elapsed + took, iters + 1)
 	}
 
@@ -166,6 +187,10 @@ decompress_loop! = |compressed, sink, best, elapsed, iters|
 		produced = decompressed_len(out)
 		finish = Utc.now!()
 		took = Utc.delta_as_nanos(finish, start)
-		next_best = if iters == 0 or took < best { took } else { best }
+		next_best = if iters == 0 or took < best {
+			took
+		} else {
+			best
+		}
 		decompress_loop!(compressed, sink + produced, next_best, elapsed + took, iters + 1)
 	}
