@@ -63,6 +63,31 @@ CompressOptimal := [].{
 		+ DeflateTables.max_match_len
 		- 1
 
+	## The most cache entries one position of the parse can write: a full set
+	## of matches plus its header, then the headers of a maximum-length skip.
+	cache_entries_per_position : U64
+	cache_entries_per_position = CompressOptimal.max_matches_per_pos + DeflateTables.max_match_len
+
+	## The cache's starting length for an input of `in_end` bytes.
+	initial_cache_size : U64 -> U64
+	initial_cache_size = |in_end|
+		(in_end + CompressOptimal.cache_entries_per_position).min(CompressOptimal.match_cache_size)
+
+	## Lengthen a match cache to at least `needed` entries, at least doubling
+	## it so that growth stays linear overall, but never past its fixed size.
+	grow_cache : List(U32), U64 -> List(U32)
+	grow_cache = |cache, needed| {
+		target = needed.max(2 * List.len(cache)).min(CompressOptimal.match_cache_size)
+		extra = target - List.len(cache).min(target)
+		var $grown = List.reserve(cache, extra)
+		var $i = 0.U64
+		while $i < extra {
+			$grown = List.append($grown, 0)
+			$i = $i + 1
+		}
+		$grown
+	}
+
 	## One node per position plus one for the end of the block. The longest a
 	## block can get is the soft maximum plus the shortest block that could
 	## follow it, since a shorter remainder is folded into the current block.
@@ -407,8 +432,9 @@ CompressOptimal := [].{
 	##
 	## The node tables are appended in that same order, so node `n` sits at
 	## index `top - n` (see `node_top`): a position's node comes after every
-	## later position's, which is exactly what its cost scan reads. The tables
-	## keep their capacity from block to block and are never initialized.
+	## later position's, which is exactly what its cost scan reads. The caller
+	## passes the tables in empty; they keep their capacity from pass to pass
+	## and block to block and are never initialized.
 	find_min_cost_path : U64, List(U32), List(U32), U64, List(U32), List(U32), List(U32), List(U32), List(U32) -> Try(PathResult, [CompressBug])
 	find_min_cost_path = |block_length, cache_len, cache_off, cache_end, node_cost_0, node_item_0, cost_literal, cost_length, cost_offset_slot| {
 		top = CompressOptimal.node_top(block_length)
@@ -418,8 +444,13 @@ CompressOptimal := [].{
 			return Err(CompressBug)
 		} else {
 		}
-		var $node_cost = List.clear(node_cost_0)
-		var $node_item = List.clear(node_item_0)
+		# The caller clears the node tables. Clearing them here would lose their
+		# capacity.
+		# TODO(roc-lang/roc#11934): a parameter used only by `List.clear` is
+		# inferred borrowed, and clearing a borrowed list allocates a new one,
+		# so every pass regrew both tables from empty.
+		var $node_cost = node_cost_0
+		var $node_item = node_item_0
 
 		# Make the block really end where it should, even though matches found
 		# near the end may reach past it: every node past the end costs too
@@ -695,11 +726,16 @@ CompressOptimal := [].{
 		var $nh3 = 0.U64
 		var $nh4 = 0.U64
 
-		var $cache_len = List.repeat(0.U32, CompressOptimal.match_cache_size)
-		var $cache_off = List.repeat(0.U32, CompressOptimal.match_cache_size)
+		# The match cache starts at one entry per input byte plus one
+		# position's worst case, and grows (doubling, up to its fixed size) only
+		# when a position might not fit; a short input then never pays for the
+		# full-size cache. The node tables need one entry per position of the
+		# longest possible block plus a match's reach past its end.
+		var $cache_len = List.repeat(0.U32, CompressOptimal.initial_cache_size(in_end))
+		var $cache_off = List.repeat(0.U32, CompressOptimal.initial_cache_size(in_end))
 		var $cache_ptr = 0.U64
-		var $node_cost = List.with_capacity(CompressOptimal.optimum_nodes_size)
-		var $node_item = List.with_capacity(CompressOptimal.optimum_nodes_size)
+		var $node_cost = List.with_capacity(CompressOptimal.optimum_nodes_size.min(in_end + DeflateTables.max_match_len))
+		var $node_item = List.with_capacity(CompressOptimal.optimum_nodes_size.min(in_end + DeflateTables.max_match_len))
 
 		var $cost_literal = List.repeat(0.U32, DeflateTables.num_literals)
 		var $cost_length = List.repeat(0.U32, DeflateTables.max_match_len + 1)
@@ -773,6 +809,14 @@ CompressOptimal := [].{
 				} else {
 				}
 
+				# One position writes at most a full set of matches and its header,
+				# then a skip of up to a maximum-length match's worth of headers.
+				cache_needed = $cache_ptr + CompressOptimal.cache_entries_per_position
+				if List.len($cache_len) < cache_needed {
+					$cache_len = CompressOptimal.grow_cache($cache_len, cache_needed)
+					$cache_off = CompressOptimal.grow_cache($cache_off, cache_needed)
+				} else {
+				}
 				matches_at = $cache_ptr
 				var $best_len = 0.U64
 				if remaining < DeflateTables.max_match_len {
@@ -997,8 +1041,8 @@ CompressOptimal := [].{
 					$cache_len,
 					$cache_off,
 					$cache_end,
-					$node_cost,
-					$node_item,
+					List.clear($node_cost),
+					List.clear($node_item),
 					sc.literal,
 					sc.length,
 					sc.offset_slot,
@@ -1062,8 +1106,8 @@ CompressOptimal := [].{
 					$cache_len,
 					$cache_off,
 					$cache_end,
-					$node_cost,
-					$node_item,
+					List.clear($node_cost),
+					List.clear($node_item),
 					$cost_literal,
 					$cost_length,
 					$cost_offset_slot,
@@ -1161,8 +1205,8 @@ CompressOptimal := [].{
 						$cache_len,
 						$cache_off,
 						$cache_end,
-						$node_cost,
-						$node_item,
+						List.clear($node_cost),
+						List.clear($node_item),
 						$cost_literal,
 						$cost_length,
 						$cost_offset_slot,
@@ -1188,8 +1232,8 @@ CompressOptimal := [].{
 					$cache_len,
 					$cache_off,
 					$cache_end,
-					$node_cost,
-					$node_item,
+					List.clear($node_cost),
+					List.clear($node_item),
 					$cost_literal,
 					$cost_length,
 					$cost_offset_slot,

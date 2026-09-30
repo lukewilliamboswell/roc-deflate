@@ -43,7 +43,9 @@ CompressFast := [].{
 		var $nh = 0.U64
 		# One allocation for the whole stream: a block appends its sequences and
 		# the run terminator, and clearing the list afterwards keeps the capacity.
-		var $seqs = List.with_capacity(CompressFast.fast_seq_store_length + 1)
+		# A block holds at most one sequence per input byte, so a short input
+		# needs no more than that.
+		var $seqs = List.with_capacity(CompressFast.fast_seq_store_length.min(in_end) + 1)
 
 		var $blocking = 1.U64
 		while $blocking == 1 {
