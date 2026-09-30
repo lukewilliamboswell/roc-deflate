@@ -296,6 +296,14 @@ CompressLazy := [].{
 			var $freqs_litlen = List.repeat(0.U32, DeflateTables.num_litlen_syms)
 			var $freqs_offset = List.repeat(0.U32, DeflateTables.num_offset_syms)
 			$seqs = List.clear($seqs)
+			# The tables hold all three regions for the whole block: the block's
+			# writes only replace entries and the slide keeps the length, so stating
+			# the size once here lets every table write in the block skip its
+			# bounds test.
+			if List.len($mf) < HcMatchfinder.table_size {
+				return Err(CompressBug)
+			} else {
+			}
 			var $litrunlen = 0.U32
 			min_len = CompressLazy.calculate_min_match_len(
 				input,
@@ -672,6 +680,14 @@ CompressLazy := [].{
 			var $freqs_litlen = List.repeat(0.U32, DeflateTables.num_litlen_syms)
 			var $freqs_offset = List.repeat(0.U32, DeflateTables.num_offset_syms)
 			$seqs = List.clear($seqs)
+			# The tables hold all three regions for the whole block: the block's
+			# writes only replace entries and the slide keeps the length, so stating
+			# the size once here lets every table write in the block skip its
+			# bounds test.
+			if List.len($mf) < HcMatchfinder.table_size {
+				return Err(CompressBug)
+			} else {
+			}
 			var $litrunlen = 0.U32
 			var $min_len = CompressLazy.calculate_min_match_len(
 				input,
