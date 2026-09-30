@@ -24,7 +24,7 @@
 ##     roc build --opt=speed benchmark/benchmark.roc --output=benchmark/benchmark
 ##     ./benchmark/benchmark benchmark/.corpus > roc.tsv
 app [main!] {
-	pf: platform "https://github.com/roc-lang/basic-cli/releases/download/0.23.0-rc1/3hT3SoHZ6qbEsa9qVFLUW3547U5LeoNd1KbpqLpz4r1i.tar.zst",
+	pf: platform "https://github.com/roc-lang/basic-cli/releases/download/0.23.0/GNN5tt2gKdX4dhawg4915C4YB193woHFdcCkz31fhGxv.tar.zst",
 	deflate: "../package/main.roc",
 }
 
