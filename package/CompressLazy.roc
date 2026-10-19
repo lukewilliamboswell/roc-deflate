@@ -152,23 +152,52 @@ CompressLazy := [].{
 			Ok(DeflateTables.min_match_len)
 		} else {
 			data_len = data_len0.min(4096)
-			var $used = List.repeat(0.U8, 256)
+			# The byte values that occur, as a 256-bit set held in four words
+			# where libdeflate uses a 256-byte array on the stack.
+			var $used0 = 0.U64
+			var $used1 = 0.U64
+			var $used2 = 0.U64
+			var $used3 = 0.U64
 			var $i = 0.U64
 			while $i < data_len {
 				b = (List.get(data, at + $i) ?? 0).to_u64()
-				$used = match List.set($used, b, 1) {
-					Ok(next) => next
-					Err(_) => return Err(CompressBug)
-				}
+				word = b.shr_zf_wrap(6)
+				bit = (1.U64).shl_wrap(b.bitwise_and(63).to_u8_wrap())
+				$used0 = $used0.bitwise_or(
+					if word == 0 {
+						bit
+					} else {
+						0
+					},
+				)
+				$used1 = $used1.bitwise_or(
+					if word == 1 {
+						bit
+					} else {
+						0
+					},
+				)
+				$used2 = $used2.bitwise_or(
+					if word == 2 {
+						bit
+					} else {
+						0
+					},
+				)
+				$used3 = $used3.bitwise_or(
+					if word == 3 {
+						bit
+					} else {
+						0
+					},
+				)
 				$i = $i + 1
 			}
-			var $num_used = 0.U64
-			$i = 0
-			while $i < 256 {
-				$num_used = $num_used + (List.get($used, $i) ?? 0).to_u64()
-				$i = $i + 1
-			}
-			Ok(CompressLazy.choose_min_match_len($num_used, max_search_depth))
+			num_used = $used0.count_one_bits().to_u64()
+				+ $used1.count_one_bits().to_u64()
+				+ $used2.count_one_bits().to_u64()
+				+ $used3.count_one_bits().to_u64()
+			Ok(CompressLazy.choose_min_match_len(num_used, max_search_depth))
 		}
 	}
 
@@ -295,6 +324,8 @@ CompressLazy := [].{
 		var $freqs_offset = List.repeat(0.U32, DeflateTables.num_offset_syms)
 		var $codes = BlockOut.init_codes({})
 		var $scratch = BlockOut.init_scratch({})
+		var $new_observations = List.repeat(0.U32, CompressLazy.num_observation_types)
+		var $observations = List.repeat(0.U32, CompressLazy.num_observation_types)
 
 		var $out = List.with_capacity(5 * ((in_end + CompressLazy.min_block_length - 1) // CompressLazy.min_block_length).max(1) + in_end)
 		var $bitbuf = 0.U64
@@ -323,8 +354,8 @@ CompressLazy := [].{
 				in_end,
 				CompressLazy.soft_max_block_length,
 			)
-			var $new_observations = List.repeat(0.U32, CompressLazy.num_observation_types)
-			var $observations = List.repeat(0.U32, CompressLazy.num_observation_types)
+			$new_observations = BlockOut.clear_counts($new_observations)?
+			$observations = BlockOut.clear_counts($observations)?
 			var $num_new_observations = 0.U64
 			var $num_observations = 0.U64
 			$freqs_litlen = BlockOut.clear_counts($freqs_litlen)?
@@ -653,6 +684,8 @@ CompressLazy := [].{
 		var $freqs_offset = List.repeat(0.U32, DeflateTables.num_offset_syms)
 		var $codes = BlockOut.init_codes({})
 		var $scratch = BlockOut.init_scratch({})
+		var $new_observations = List.repeat(0.U32, CompressLazy.num_observation_types)
+		var $observations = List.repeat(0.U32, CompressLazy.num_observation_types)
 
 		var $out = List.with_capacity(5 * ((in_end + CompressLazy.min_block_length - 1) // CompressLazy.min_block_length).max(1) + in_end)
 		var $bitbuf = 0.U64
@@ -683,8 +716,8 @@ CompressLazy := [].{
 				CompressLazy.soft_max_block_length,
 			)
 			var $next_recalc_min_len = $in_next + (in_end - $in_next).min(10000)
-			var $new_observations = List.repeat(0.U32, CompressLazy.num_observation_types)
-			var $observations = List.repeat(0.U32, CompressLazy.num_observation_types)
+			$new_observations = BlockOut.clear_counts($new_observations)?
+			$observations = BlockOut.clear_counts($observations)?
 			var $num_new_observations = 0.U64
 			var $num_observations = 0.U64
 			$freqs_litlen = BlockOut.clear_counts($freqs_litlen)?
