@@ -18,6 +18,12 @@ import DeflateTables
 ##
 ## Each array entry packs a symbol in the low [HuffmanEncode.num_symbol_bits]
 ## bits and a frequency (later a parent index, later a depth) above it.
+##
+## libdeflate keeps its counters on the stack. Here they live in one scratch
+## list the caller passes in and gets back, so building a code allocates
+## nothing: the sort's per-symbol counters come first, and once the sort is
+## done the same storage holds the per-length counts and, past them at
+## [HuffmanEncode.next_codewords_at], the next codeword of each length.
 HuffmanEncode := [].{
 
 	## Bits of each packed entry that hold the symbol.
@@ -33,6 +39,31 @@ HuffmanEncode := [].{
 	## The longest codeword DEFLATE allows in any of its codes.
 	max_codeword_len : U64
 	max_codeword_len = 15
+
+	## Where the next codeword of each length starts in the scratch list, just
+	## past the per-length counts.
+	next_codewords_at : U64
+	next_codewords_at = HuffmanEncode.max_codeword_len + 2
+
+	## A scratch list long enough for any of DEFLATE's alphabets.
+	init_scratch : {} -> List(U64)
+	init_scratch = |{}|
+		List.repeat(0.U64, DeflateTables.num_litlen_syms)
+
+	## Zero `len` entries of a scratch list from `start`, keeping its storage.
+	clear_range : List(U64), U64, U64 -> Try(List(U64), [CompressBug])
+	clear_range = |scratch, start, len| {
+		var $scratch = scratch
+		var $i = start
+		while $i < start + len {
+			$scratch = match List.set($scratch, $i, 0) {
+				Ok(next) => next
+				Err(_) => return Err(CompressBug)
+			}
+			$i = $i + 1
+		}
+		Ok($scratch)
+	}
 
 	## Restore the maxheap property in the subtree rooted at `subtree_idx`,
 	## whose children already satisfy it, by sifting the root down. Indices are
@@ -107,7 +138,7 @@ HuffmanEncode := [].{
 		Ok($a)
 	}
 
-	SortedSymbols : { symout : List(U32), lens : List(U8), num_used_syms : U64 }
+	SortedSymbols : { symout : List(U32), lens : List(U8), counters : List(U64), num_used_syms : U64 }
 
 	## Sort the symbols by frequency, then by symbol value, discarding those
 	## with zero frequency and setting their codeword lengths to zero.
@@ -115,14 +146,14 @@ HuffmanEncode := [].{
 	## Most frequencies are small, so a counting sort over one counter per
 	## symbol places nearly every symbol directly; only the symbols that landed
 	## in the saturating top counter need the comparison sort.
-	sort_symbols : U64, List(U32), List(U8), List(U32) -> Try(SortedSymbols, [CompressBug])
-	sort_symbols = |num_syms, freqs, lens0, symout0| {
+	sort_symbols : U64, List(U32), List(U8), List(U32), List(U64) -> Try(SortedSymbols, [CompressBug])
+	sort_symbols = |num_syms, freqs, lens0, symout0, counters0| {
 		var $lens = lens0
 		var $symout = symout0
 		num_counters = num_syms
 		top = num_counters - 1
 
-		var $counters = List.repeat(0.U64, num_counters)
+		var $counters = HuffmanEncode.clear_range(counters0, 0, num_counters)?
 		var $sym = 0.U64
 		while $sym < num_syms {
 			slot = (List.get(freqs, $sym) ?? 0).to_u64().min(top)
@@ -177,7 +208,7 @@ HuffmanEncode := [].{
 		sort_len = (List.get($counters, top) ?? 0) - sort_base
 		$symout = HuffmanEncode.heap_sort($symout, sort_base, sort_len)?
 
-		Ok({ symout: $symout, lens: $lens, num_used_syms: $num_used_syms })
+		Ok({ symout: $symout, lens: $lens, counters: $counters, num_used_syms: $num_used_syms })
 	}
 
 	## Build the stripped-down Huffman tree in place: only non-leaf nodes, each
@@ -245,8 +276,7 @@ HuffmanEncode := [].{
 			# A tree with n leaves has n - 1 non-leaves.
 			if $e >= last_idx {
 				$building = False
-			} else {
-			}
+			} else {}
 		}
 		Ok($a)
 	}
@@ -259,10 +289,10 @@ HuffmanEncode := [].{
 	## from its own depth to two at the next depth down. A depth past the limit
 	## is clamped to the deepest length already in use, which is what keeps the
 	## code length-limited.
-	compute_length_counts : List(U32), U64, U64 -> Try({ a : List(U32), len_counts : List(U64) }, [CompressBug])
-	compute_length_counts = |a0, root_idx, max_len| {
+	compute_length_counts : List(U32), U64, U64, List(U64) -> Try({ a : List(U32), len_counts : List(U64) }, [CompressBug])
+	compute_length_counts = |a0, root_idx, max_len, scratch| {
 		var $a = a0
-		var $len_counts = List.repeat(0.U64, max_len + 2)
+		var $len_counts = HuffmanEncode.clear_range(scratch, 0, max_len + 2)?
 		$len_counts = match List.set($len_counts, 1, 2) {
 			Ok(next) => next
 			Err(_) => return Err(CompressBug)
@@ -284,8 +314,12 @@ HuffmanEncode := [].{
 			depth0 = parent_depth + 1
 
 			# Record this node's depth so its own children can read it.
-			$a = match List.set($a, node, entry.bitwise_and(HuffmanEncode.symbol_mask)
-					.bitwise_or(depth0.to_u32_wrap().shl_wrap(HuffmanEncode.num_symbol_bits.to_u8_wrap()))) {
+			$a = match List.set(
+				$a,
+				node,
+				entry.bitwise_and(HuffmanEncode.symbol_mask)
+					.bitwise_or(depth0.to_u32_wrap().shl_wrap(HuffmanEncode.num_symbol_bits.to_u8_wrap())),
+			) {
 				Ok(next) => next
 				Err(_) => return Err(CompressBug)
 			}
@@ -298,11 +332,9 @@ HuffmanEncode := [].{
 					$depth = $depth - 1
 					if (List.get($len_counts, $depth) ?? 0) != 0 {
 						$scanning = False
-					} else {
-					}
+					} else {}
 				}
-			} else {
-			}
+			} else {}
 
 			$len_counts = match List.set($len_counts, $depth, (List.get($len_counts, $depth) ?? 0) - 1) {
 				Ok(next) => next
@@ -350,15 +382,19 @@ HuffmanEncode := [].{
 	## frequency order the array is already in, so the rarest symbols get the
 	## longest codewords. The codewords themselves come from a running first
 	## codeword per length, which is what makes the code canonical.
-	gen_codewords : List(U32), List(U8), List(U64), U64, U64 -> Try({ a : List(U32), lens : List(U8) }, [CompressBug])
-	gen_codewords = |a0, lens0, len_counts, max_len, num_syms| {
+	##
+	## The per-length counts arrive at the start of the scratch list, and the
+	## next codeword of each length is kept past them.
+	gen_codewords : List(U32), List(U8), List(U64), U64, U64 -> Try({ a : List(U32), lens : List(U8), scratch : List(U64) }, [CompressBug])
+	gen_codewords = |a0, lens0, scratch, max_len, num_syms| {
 		var $a = a0
 		var $lens = lens0
+		at = HuffmanEncode.next_codewords_at
 
 		var $i = 0.U64
 		var $len = max_len
 		while $len >= 1 {
-			var $count = List.get(len_counts, $len) ?? 0
+			var $count = List.get(scratch, $len) ?? 0
 			while $count > 0 {
 				sym = (List.get($a, $i) ?? 0).bitwise_and(HuffmanEncode.symbol_mask).to_u64()
 				$lens = match List.set($lens, sym, $len.to_u8_wrap()) {
@@ -371,13 +407,14 @@ HuffmanEncode := [].{
 			$len = $len - 1
 		}
 
-		# The lexicographically first codeword of each length.
-		var $next_codewords = List.repeat(0.U32, HuffmanEncode.max_codeword_len + 2)
+		# The lexicographically first codeword of each length, kept past the
+		# counts.
+		var $scratch = HuffmanEncode.clear_range(scratch, at, HuffmanEncode.max_codeword_len + 2)?
 		var $l = 2.U64
 		while $l <= max_len {
-			prev = List.get($next_codewords, $l - 1) ?? 0
-			prev_count = (List.get(len_counts, $l - 1) ?? 0).to_u32_wrap()
-			$next_codewords = match List.set($next_codewords, $l, prev.plus_wrap(prev_count).shl_wrap(1)) {
+			prev = (List.get($scratch, at + $l - 1) ?? 0).to_u32_wrap()
+			prev_count = (List.get($scratch, $l - 1) ?? 0).to_u32_wrap()
+			$scratch = match List.set($scratch, at + $l, prev.plus_wrap(prev_count).shl_wrap(1).to_u64()) {
 				Ok(next) => next
 				Err(_) => return Err(CompressBug)
 			}
@@ -387,8 +424,8 @@ HuffmanEncode := [].{
 		var $sym = 0.U64
 		while $sym < num_syms {
 			sym_len = (List.get($lens, $sym) ?? 0).to_u64()
-			codeword = List.get($next_codewords, sym_len) ?? 0
-			$next_codewords = match List.set($next_codewords, sym_len, codeword + 1) {
+			codeword = (List.get($scratch, at + sym_len) ?? 0).to_u32_wrap()
+			$scratch = match List.set($scratch, at + sym_len, (codeword + 1).to_u64()) {
 				Ok(next) => next
 				Err(_) => return Err(CompressBug)
 			}
@@ -398,19 +435,21 @@ HuffmanEncode := [].{
 			}
 			$sym = $sym + 1
 		}
-		Ok({ a: $a, lens: $lens })
+		Ok({ a: $a, lens: $lens, scratch: $scratch })
 	}
 
-	Code : { lens : List(U8), codewords : List(U32) }
+	Code : { lens : List(U8), codewords : List(U32), scratch : List(U64) }
 
 	## Build a length-limited canonical Huffman code for one alphabet.
 	##
-	## The caller supplies the scratch lists for the lengths and codewords; the
-	## codeword list doubles as the sort and tree array while the code is being
-	## built, exactly as libdeflate reuses that storage.
-	make_code : U64, U64, List(U32), List(U8), List(U32) -> Try(Code, [CompressBug])
-	make_code = |num_syms, max_len, freqs, lens0, codewords0| {
-		sorted = HuffmanEncode.sort_symbols(num_syms, freqs, lens0, codewords0)?
+	## The caller supplies the lists for the lengths and codewords, which are
+	## overwritten, and the scratch list (see [HuffmanEncode.init_scratch]),
+	## and gets all three back. The codeword list doubles as the sort and tree
+	## array while the code is being built, exactly as libdeflate reuses that
+	## storage.
+	make_code : U64, U64, List(U32), List(U8), List(U32), List(U64) -> Try(Code, [CompressBug])
+	make_code = |num_syms, max_len, freqs, lens0, codewords0, scratch0| {
+		sorted = HuffmanEncode.sort_symbols(num_syms, freqs, lens0, codewords0, scratch0)?
 		num_used_syms = sorted.num_used_syms
 
 		if num_used_syms < 2 {
@@ -425,11 +464,21 @@ HuffmanEncode := [].{
 				} else {
 					0
 				}
-			nonzero_idx = if sym != 0 { sym } else { 1 }
+			nonzero_idx = if sym != 0 {
+				sym
+			} else {
+				1
+			}
 
-			$codewords = match List.set($codewords, 0, 0) {
-				Ok(next) => next
-				Err(_) => return Err(CompressBug)
+			# The codeword list may still hold an earlier code's codewords, and
+			# the unused symbols' entries must not keep them.
+			var $i = 0.U64
+			while $i < num_syms {
+				$codewords = match List.set($codewords, $i, 0) {
+					Ok(next) => next
+					Err(_) => return Err(CompressBug)
+				}
+				$i = $i + 1
 			}
 			$lens = match List.set($lens, 0, 1) {
 				Ok(next) => next
@@ -443,10 +492,10 @@ HuffmanEncode := [].{
 				Ok(next) => next
 				Err(_) => return Err(CompressBug)
 			}
-			Ok({ lens: $lens, codewords: $codewords })
+			Ok({ lens: $lens, codewords: $codewords, scratch: sorted.counters })
 		} else {
 			built = HuffmanEncode.build_tree(sorted.symout, num_used_syms)?
-			counted = HuffmanEncode.compute_length_counts(built, num_used_syms - 2, max_len)?
+			counted = HuffmanEncode.compute_length_counts(built, num_used_syms - 2, max_len, sorted.counters)?
 			generated = HuffmanEncode.gen_codewords(
 				counted.a,
 				sorted.lens,
@@ -454,7 +503,7 @@ HuffmanEncode := [].{
 				max_len,
 				num_syms,
 			)?
-			Ok({ lens: generated.lens, codewords: generated.a })
+			Ok({ lens: generated.lens, codewords: generated.a, scratch: generated.scratch })
 		}
 	}
 }

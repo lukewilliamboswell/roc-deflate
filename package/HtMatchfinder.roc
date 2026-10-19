@@ -58,15 +58,13 @@ HtMatchfinder := [].{
 		# position skip their bounds tests.
 		if in_next + max_len > List.len(input) or max_len < HtMatchfinder.required_nbytes {
 			return Err(CompressBug)
-		} else {
-		}
+		} else {}
 		var $tab = tab_0
 		var $base = base_0
 		if in_next.minus_wrap($base) == Matchfinder.window_size {
 			$tab = Matchfinder.rebase_nodes($tab)
 			$base = $base.plus_wrap(Matchfinder.window_size)
-		} else {
-		}
+		} else {}
 		in_base = $base
 		# A node at or below the current position, in the biased space the
 		# tables use, is out of the window.
@@ -79,8 +77,7 @@ HtMatchfinder := [].{
 		slot0 = hash.bitwise_and(0x7FFF).times_wrap(2)
 		if slot0.plus_wrap(1) >= List.len($tab) {
 			return Err(CompressBug)
-		} else {
-		}
+		} else {}
 		cur_node0 = List.get($tab, slot0) ?? 0
 		tab1 = match List.set($tab, slot0, cur_pos.plus_wrap(Matchfinder.node_bias).to_u16_wrap()) {
 			Ok(next) => next
@@ -105,8 +102,7 @@ HtMatchfinder := [].{
 			if (U32.from_le_bytes(input, match0_at) ?? 0) == seq {
 				$best_len = Matchfinder.lz_extend(input, in_next, match0_at, 4, max_len)
 				$best_match_at = match0_at
-				if cur_node1.to_u64() <= cur_pos or $best_len >= nice_len {
-				} else {
+				if (cur_node1.to_u64() <= cur_pos or $best_len >= nice_len) {} else {
 					match1_at = Matchfinder.node_index(in_base, cur_node1)
 					if (U32.from_le_bytes(input, match1_at) ?? 0) == seq
 						and (U32.from_le_bytes(input, match1_at.plus_wrap($best_len).minus_wrap(3)) ?? 0)
@@ -115,20 +111,16 @@ HtMatchfinder := [].{
 						if len > $best_len {
 							$best_len = len
 							$best_match_at = match1_at
-						} else {
-						}
-					} else {
-					}
+						} else {}
+					} else {}
 				}
 			} else {
-				if cur_node1.to_u64() <= cur_pos {
-				} else {
+				if (cur_node1.to_u64() <= cur_pos) {} else {
 					match1_at = Matchfinder.node_index(in_base, cur_node1)
 					if (U32.from_le_bytes(input, match1_at) ?? 0) == seq {
 						$best_len = Matchfinder.lz_extend(input, in_next, match1_at, 4, max_len)
 						$best_match_at = match1_at
-					} else {
-					}
+					} else {}
 				}
 			}
 
@@ -165,12 +157,10 @@ HtMatchfinder := [].{
 				$tab = Matchfinder.rebase_nodes($tab)
 				$base = $base.plus_wrap(Matchfinder.window_size)
 				$cur_pos = $cur_pos.minus_wrap(Matchfinder.window_size.to_i64_wrap())
-			} else {
-			}
+			} else {}
 			if List.len($tab) < HtMatchfinder.table_size {
 				return Err(CompressBug)
-			} else {
-			}
+			} else {}
 
 			# Wrapping arithmetic: the run was bounded against the input above and
 			# a bucket index is a masked hash doubled, so nothing here can overflow

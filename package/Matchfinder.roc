@@ -39,7 +39,14 @@ Matchfinder := [].{
 	## node already in the first window stays permanently out of it.
 	rebase_nodes : List(U16) -> List(U16)
 	rebase_nodes = |table|
-		List.map(table, |v| if v >= 32768 { v.minus_wrap(32768) } else { 0 })
+		List.map(
+			table,
+			|v| if v >= 32768 {
+				v.minus_wrap(32768)
+			} else {
+				0
+			},
+		)
 
 	## Absolute input index of a biased node.
 	node_index : U64, U16 -> U64
@@ -62,8 +69,7 @@ Matchfinder := [].{
 	lz_extend = |input, str_at, match_at, start_len, max_len| {
 		if str_at + max_len > List.len(input) or match_at >= str_at {
 			crash "lz_extend: match window outside the input"
-		} else {
-		}
+		} else {}
 		var $len = start_len
 
 		# Four word compares cover most matches. Each returns the match length
@@ -77,20 +83,17 @@ Matchfinder := [].{
 				d = (U64.from_le_bytes(input, match_at.plus_wrap($len)) ?? 0).bitwise_xor(s)
 				if d != 0 {
 					return $len.plus_wrap(d.count_trailing_zero_bits().to_u64().shr_zf_wrap(3))
-				} else {
-				}
+				} else {}
 				$len = $len.plus_wrap(8)
 			}
-		} else {
-		}
+		} else {}
 
 		while $len + 8 <= max_len {
 			s = U64.from_le_bytes(input, str_at.plus_wrap($len)) ?? 0
 			d = (U64.from_le_bytes(input, match_at.plus_wrap($len)) ?? 0).bitwise_xor(s)
 			if d != 0 {
 				return $len.plus_wrap(d.count_trailing_zero_bits().to_u64().shr_zf_wrap(3))
-			} else {
-			}
+			} else {}
 			$len = $len.plus_wrap(8)
 		}
 
