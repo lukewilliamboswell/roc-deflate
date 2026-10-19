@@ -22,6 +22,7 @@ import pf.IOErr exposing [IOErr]
 import pf.OsStr exposing [OsStr]
 
 corpus_dir = "benchmark/.corpus"
+
 mirror = "https://raw.githubusercontent.com/MiloszKrajewski/SilesiaCorpus/master"
 
 # Each Silesia file with the sha256 of its .zip on the mirror.

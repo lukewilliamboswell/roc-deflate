@@ -245,8 +245,7 @@ HuffmanEncode := [].{
 			# A tree with n leaves has n - 1 non-leaves.
 			if $e >= last_idx {
 				$building = False
-			} else {
-			}
+			} else {}
 		}
 		Ok($a)
 	}
@@ -284,8 +283,12 @@ HuffmanEncode := [].{
 			depth0 = parent_depth + 1
 
 			# Record this node's depth so its own children can read it.
-			$a = match List.set($a, node, entry.bitwise_and(HuffmanEncode.symbol_mask)
-					.bitwise_or(depth0.to_u32_wrap().shl_wrap(HuffmanEncode.num_symbol_bits.to_u8_wrap()))) {
+			$a = match List.set(
+				$a,
+				node,
+				entry.bitwise_and(HuffmanEncode.symbol_mask)
+					.bitwise_or(depth0.to_u32_wrap().shl_wrap(HuffmanEncode.num_symbol_bits.to_u8_wrap())),
+			) {
 				Ok(next) => next
 				Err(_) => return Err(CompressBug)
 			}
@@ -298,11 +301,9 @@ HuffmanEncode := [].{
 					$depth = $depth - 1
 					if (List.get($len_counts, $depth) ?? 0) != 0 {
 						$scanning = False
-					} else {
-					}
+					} else {}
 				}
-			} else {
-			}
+			} else {}
 
 			$len_counts = match List.set($len_counts, $depth, (List.get($len_counts, $depth) ?? 0) - 1) {
 				Ok(next) => next
@@ -425,7 +426,11 @@ HuffmanEncode := [].{
 				} else {
 					0
 				}
-			nonzero_idx = if sym != 0 { sym } else { 1 }
+			nonzero_idx = if sym != 0 {
+				sym
+			} else {
+				1
+			}
 
 			$codewords = match List.set($codewords, 0, 0) {
 				Ok(next) => next

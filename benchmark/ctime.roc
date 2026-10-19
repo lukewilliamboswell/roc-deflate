@@ -1,6 +1,6 @@
 app [main!] {
-	pf: platform "https://github.com/niclas-ahden/basic-cli/releases/download/0.22.1/DobkAk7zNyqAgqh2Riaj5c5DtWtKhd5iVYE5RFa6izcd.tar.zst",
 	deflate: "../package/main.roc",
+	pf: platform "https://github.com/niclas-ahden/basic-cli/releases/download/0.22.1/DobkAk7zNyqAgqh2Riaj5c5DtWtKhd5iVYE5RFa6izcd.tar.zst",
 }
 
 import pf.Stdout
@@ -37,8 +37,7 @@ main! = |args| {
 	if back != data {
 		Stdout.line!("VERIFY FAIL") ? |_| Exit(8)
 		return Err(Exit(8))
-	} else {
-	}
+	} else {}
 	Path.write_bytes!(Path.from_os_str(out_os), first) ? |_| Exit(9)
 
 	in_len = List.len(data)

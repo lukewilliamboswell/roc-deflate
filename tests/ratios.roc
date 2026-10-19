@@ -11,8 +11,8 @@
 ##
 ##     roc build --opt=speed tests/ratios.roc && ./tests/ratios
 app [main!] {
-	pf: platform "https://github.com/roc-lang/basic-cli/releases/download/0.23.0/GNN5tt2gKdX4dhawg4915C4YB193woHFdcCkz31fhGxv.tar.zst",
 	deflate: "../package/main.roc",
+	pf: platform "https://github.com/roc-lang/basic-cli/releases/download/0.23.0/GNN5tt2gKdX4dhawg4915C4YB193woHFdcCkz31fhGxv.tar.zst",
 }
 
 import pf.Stdout
@@ -24,8 +24,11 @@ import deflate.Deflate
 # Ratchet ceilings: the current Deflate output size in bytes for the Canterbury
 # corpus at each level. Lower these when compression improves.
 max_level_1 = 791919
+
 max_level_6 = 721981
+
 max_level_9 = 694996
+
 max_level_12 = 673464
 
 main! = |_| {

@@ -78,8 +78,7 @@ HcMatchfinder := [].{
 		expect List.len(input) >= 4
 		if List.len(input) < 4 {
 			return { length: 0, offset: 0 }
-		} else {
-		}
+		} else {}
 		# The chain region is one window long, so every masked chain index is
 		# in range, and a length guard here would let each chain read's bounds
 		# test fold away. It is deliberately absent: the test costs nothing on
@@ -109,10 +108,8 @@ HcMatchfinder := [].{
 						== seq4.bitwise_and(0xFFFFFF) {
 						$best_len = 3
 						$best_match_at = match_at
-					} else {
-					}
-				} else {
-				}
+					} else {}
+				} else {}
 
 				if $node4.to_u64() <= cur_pos {
 					$done = 1
@@ -124,15 +121,13 @@ HcMatchfinder := [].{
 						if (U32.from_le_bytes(input, match_at) ?? 0) == seq4 {
 							$found_at = match_at
 							break
-						} else {
-						}
+						} else {}
 						$node4 = List.get(tab, $node4.to_u64().bitwise_and(32767)) ?? 0
 						$depth = $depth.minus_wrap(1)
 						if $node4.to_u64() <= cur_pos or $depth == 0 {
 							$done = 1
 							break
-						} else {
-						}
+						} else {}
 					}
 
 					if $done == 0 {
@@ -145,18 +140,15 @@ HcMatchfinder := [].{
 							$depth = $depth.minus_wrap(1)
 							if $node4.to_u64() <= cur_pos or $depth == 0 {
 								$done = 1
-							} else {
-							}
+							} else {}
 						}
-					} else {
-					}
+					} else {}
 				}
 			}
 		} else {
 			if $node4.to_u64() <= cur_pos or $best_len >= nice_len {
 				$done = 1
-			} else {
-			}
+			} else {}
 		}
 
 		# Now look only for matches longer than the one in hand.
@@ -174,15 +166,13 @@ HcMatchfinder := [].{
 					and (U32.from_le_bytes(input, match_at) ?? 0) == seq4 {
 					$cand_at = match_at
 					break
-				} else {
-				}
+				} else {}
 				$node4 = List.get(tab, $node4.to_u64().bitwise_and(32767)) ?? 0
 				$depth = $depth.minus_wrap(1)
 				if $node4.to_u64() <= cur_pos or $depth == 0 {
 					$done = 1
 					break
-				} else {
-				}
+				} else {}
 			}
 
 			if $done == 0 {
@@ -192,21 +182,16 @@ HcMatchfinder := [].{
 					$best_match_at = $cand_at
 					if $best_len >= nice_len {
 						$done = 1
-					} else {
-					}
-				} else {
-				}
+					} else {}
+				} else {}
 				if $done == 0 {
 					$node4 = List.get(tab, $node4.to_u64().bitwise_and(32767)) ?? 0
 					$depth = $depth.minus_wrap(1)
 					if $node4.to_u64() <= cur_pos or $depth == 0 {
 						$done = 1
-					} else {
-					}
-				} else {
-				}
-			} else {
-			}
+					} else {}
+				} else {}
+			} else {}
 		}
 
 		{ length: $best_len, offset: in_next.minus_wrap($best_match_at) }
@@ -237,8 +222,7 @@ HcMatchfinder := [].{
 				$tab = Matchfinder.rebase_nodes($tab)
 				$base = $base.plus_wrap(Matchfinder.window_size)
 				$cur_pos = $cur_pos.minus_wrap(Matchfinder.window_size.to_i64_wrap())
-			} else {
-			}
+			} else {}
 			# The table holds all three regions, and the incoming hashes are
 			# already reduced to their region's size. Establishing both once
 			# here lets the bounds test on every table access in the loop fold
@@ -247,8 +231,7 @@ HcMatchfinder := [].{
 				or nh3_0 >= HcMatchfinder.hash3_size
 				or nh4_0 >= HcMatchfinder.hash4_size {
 				return Err(CompressBug)
-			} else {
-			}
+			} else {}
 			# Wrapping arithmetic: the run was bounded against the input above and
 			# the table indices are a region base plus a reduced hash, so nothing
 			# here can overflow and a checked add would only cost a branch per byte.

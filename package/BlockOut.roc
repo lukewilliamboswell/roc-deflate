@@ -92,7 +92,7 @@ BlockOut := [].{
 						Ok(next) => next
 						Err(_) => return Err(CompressBug)
 					}
-					$items = match List.set($items, $num_items, 18.U32.bitwise_or(extra.to_u32_wrap().shl_wrap(5))) {
+					$items = match List.set($items, $num_items, (18.U32).bitwise_or(extra.to_u32_wrap().shl_wrap(5))) {
 						Ok(next) => next
 						Err(_) => return Err(CompressBug)
 					}
@@ -106,14 +106,13 @@ BlockOut := [].{
 						Ok(next) => next
 						Err(_) => return Err(CompressBug)
 					}
-					$items = match List.set($items, $num_items, 17.U32.bitwise_or(extra.to_u32_wrap().shl_wrap(5))) {
+					$items = match List.set($items, $num_items, (17.U32).bitwise_or(extra.to_u32_wrap().shl_wrap(5))) {
 						Ok(next) => next
 						Err(_) => return Err(CompressBug)
 					}
 					$num_items = $num_items + 1
 					$run_start = $run_start + 3 + extra
-				} else {
-				}
+				} else {}
 			} else {
 				# Symbol 16 repeats the previous length 3 to 6 more times, so
 				# the length itself must be written once first.
@@ -136,7 +135,7 @@ BlockOut := [].{
 							Ok(next) => next
 							Err(_) => return Err(CompressBug)
 						}
-						$items = match List.set($items, $num_items, 16.U32.bitwise_or(extra.to_u32_wrap().shl_wrap(5))) {
+						$items = match List.set($items, $num_items, (16.U32).bitwise_or(extra.to_u32_wrap().shl_wrap(5))) {
 							Ok(next) => next
 							Err(_) => return Err(CompressBug)
 						}
@@ -144,11 +143,9 @@ BlockOut := [].{
 						$run_start = $run_start + 3 + extra
 						if ($run_end - $run_start) < 3 {
 							$repeating = False
-						} else {
-						}
+						} else {}
 					}
-				} else {
-				}
+				} else {}
 			}
 
 			# Whatever the run-length symbols could not cover goes out plainly.
@@ -261,14 +258,16 @@ BlockOut := [].{
 			litlen_sym = DeflateTables.first_len_sym + slot
 			extra_bits = $len.to_u32_wrap() - (List.get(DeflateTables.length_slot_base, slot) ?? 0)
 			sym_len = (List.get(litlen_lens, litlen_sym) ?? 0)
-			$codewords = match List.set($codewords, $len,
+			$codewords = match List.set(
+				$codewords,
+				$len,
 				(List.get(litlen_codewords, litlen_sym) ?? 0)
-					.bitwise_or(extra_bits.shl_wrap(sym_len))) {
+					.bitwise_or(extra_bits.shl_wrap(sym_len)),
+			) {
 				Ok(next) => next
 				Err(_) => return Err(CompressBug)
 			}
-			$lens = match List.set($lens, $len,
-				sym_len + (List.get(DeflateTables.extra_length_bits, slot) ?? 0)) {
+			$lens = match List.set($lens, $len, sym_len + (List.get(DeflateTables.extra_length_bits, slot) ?? 0)) {
 				Ok(next) => next
 				Err(_) => return Err(CompressBug)
 			}
@@ -406,7 +405,7 @@ BlockOut := [].{
 		block_length = block_length_0
 		num_uncompressed_blocks = (block_length + 65534) // 65535
 		uncompressed_cost = 3
-			+ 0.U64.minus_wrap(bitcount_0 + 3).bitwise_and(7)
+			+ (0.U64).minus_wrap(bitcount_0 + 3).bitwise_and(7)
 			+ 32
 			+ 40 * (num_uncompressed_blocks - 1)
 			+ 8 * block_length
@@ -426,14 +425,17 @@ BlockOut := [].{
 			while $storing {
 				remaining = in_end - $in_next
 				len = remaining.min(65535)
-				bfinal = if remaining <= 65535 { is_final } else { 0 }
+				bfinal = if remaining <= 65535 {
+					is_final
+				} else {
+					0
+				}
 
 				# The header is three bits, then the stream aligns to a byte.
 				$out = List.append($out, bfinal.shl_wrap($bitcount.to_u8_wrap()).bitwise_or($bitbuf).to_u8_wrap())
 				if $bitcount > 5 {
 					$out = List.append($out, 0)
-				} else {
-				}
+				} else {}
 				$bitbuf = 0
 				$bitcount = 0
 
@@ -449,8 +451,7 @@ BlockOut := [].{
 				$in_next = $in_next + len
 				if $in_next == in_end {
 					$storing = False
-				} else {
-				}
+				} else {}
 			}
 			Ok({
 				out: $out,
@@ -543,10 +544,26 @@ BlockOut := [].{
 				}
 			}
 
-			w_litlen_lens = if use_static { s_litlen_lens } else { litlen_lens }
-			w_litlen_codewords = if use_static { s_litlen_codewords } else { litlen_codewords }
-			w_offset_lens = if use_static { s_offset_lens } else { offset_lens }
-			w_offset_codewords = if use_static { s_offset_codewords } else { offset_codewords }
+			w_litlen_lens = if use_static {
+				s_litlen_lens
+			} else {
+				litlen_lens
+			}
+			w_litlen_codewords = if use_static {
+				s_litlen_codewords
+			} else {
+				litlen_codewords
+			}
+			w_offset_lens = if use_static {
+				s_offset_lens
+			} else {
+				offset_lens
+			}
+			w_offset_codewords = if use_static {
+				s_offset_codewords
+			} else {
+				offset_codewords
+			}
 			full = BlockOut.compute_full_len_codewords(w_litlen_lens, w_litlen_codewords)?
 			full_codewords = full.codewords
 			full_lens = full.lens
@@ -554,7 +571,11 @@ BlockOut := [].{
 			# The path holds node `n` at `items_top - n`, appended from the end
 			# of the block back to its start.
 			items_top = List.len(items).minus_wrap(1)
-			var $item_at = if use_items == 1 { 0.U64 } else { block_length }
+			var $item_at = if use_items == 1 {
+				0.U64
+			} else {
+				block_length
+			}
 			while $item_at != block_length {
 				item = List.get(items, items_top.minus_wrap($item_at)) ?? 0
 				length = item.bitwise_and(0x1FF).to_u64()
@@ -598,8 +619,7 @@ BlockOut := [].{
 			# literal's lookup fold away instead of running per symbol.
 			if List.len(packed_litlen) < DeflateTables.num_literals {
 				return Err(CompressBug)
-			} else {
-			}
+			} else {}
 
 			# Wrapping arithmetic on the per-symbol path: the bit count never
 			# exceeds the buffer's width between flushes, the cursor never
@@ -664,10 +684,8 @@ BlockOut := [].{
 							$bitbuf = $bitbuf.bitwise_or(packed2.bitwise_and(0xFFFF_FFFF).shl_wrap($bitcount.to_u8_wrap()))
 							$bitcount = $bitcount.plus_wrap(packed2.shr_zf_wrap(32))
 							$in_next = $in_next.plus_wrap(1)
-						} else {
-						}
-					} else {
-					}
+						} else {}
+					} else {}
 					n = $bitcount.shr_zf_wrap(3)
 					$out = match $bitbuf.append_le_bytes_to($out, n.to_u8_wrap()) {
 						Ok(next) => next
@@ -675,8 +693,7 @@ BlockOut := [].{
 					}
 					$bitbuf = $bitbuf.shr_zf_wrap(n.shl_wrap(3).to_u8_wrap())
 					$bitcount = $bitcount.bitwise_and(7)
-				} else {
-				}
+				} else {}
 
 				if length == 0 {
 					$writing = False

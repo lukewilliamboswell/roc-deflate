@@ -89,8 +89,7 @@ CompressFast := [].{
 					} else {
 						$nice_len = $nice_len.min($max_len)
 					}
-				} else {
-				}
+				} else {}
 
 				if $searched == 1 {
 					found = HtMatchfinder.longest_match($tab, $base, $nh, input, $in_next, $max_len, $nice_len)?
@@ -112,11 +111,14 @@ CompressFast := [].{
 							Ok(next) => next
 							Err(_) => return Err(CompressBug)
 						}
-						$seqs = List.append($seqs, {
-							litrunlen_and_length: $litrunlen.bitwise_or(found.length.to_u32_wrap().shl_wrap(BlockOut.seq_length_shift)),
-							offset: found.offset.to_u16_wrap(),
-							offset_slot: offset_slot.to_u16_wrap(),
-						})
+						$seqs = List.append(
+							$seqs,
+							{
+								litrunlen_and_length: $litrunlen.bitwise_or(found.length.to_u32_wrap().shl_wrap(BlockOut.seq_length_shift)),
+								offset: found.offset.to_u16_wrap(),
+								offset_slot: offset_slot.to_u16_wrap(),
+							},
+						)
 						$litrunlen = 0
 
 						skipped = HtMatchfinder.skip_bytes($tab, $base, $nh, input, $in_next.plus_wrap(1), in_end, found.length.minus_wrap(1))?
@@ -137,19 +139,19 @@ CompressFast := [].{
 
 					if $in_next >= in_max_block_end or List.len($seqs) >= CompressFast.fast_seq_store_length {
 						$in_block = 0
-					} else {
-					}
-				} else {
-				}
+					} else {}
+				} else {}
 			}
 
-			$seqs = List.append($seqs, {
-				litrunlen_and_length: $litrunlen,
-				offset: 0.U16,
-				offset_slot: 0.U16,
-			})
-			$freqs_litlen = match List.set($freqs_litlen, DeflateTables.end_of_block,
-				(List.get($freqs_litlen, DeflateTables.end_of_block) ?? 0) + 1) {
+			$seqs = List.append(
+				$seqs,
+				{
+					litrunlen_and_length: $litrunlen,
+					offset: 0.U16,
+					offset_slot: 0.U16,
+				},
+			)
+			$freqs_litlen = match List.set($freqs_litlen, DeflateTables.end_of_block, (List.get($freqs_litlen, DeflateTables.end_of_block) ?? 0) + 1) {
 				Ok(next) => next
 				Err(_) => return Err(CompressBug)
 			}
@@ -168,7 +170,11 @@ CompressFast := [].{
 				List.repeat(0.U32, DeflateTables.num_offset_syms),
 			)?
 
-			is_final = if $in_next == in_end { 1 } else { 0 }
+			is_final = if $in_next == in_end {
+				1
+			} else {
+				0
+			}
 			flushed = BlockOut.flush_block(
 				$out,
 				$bitbuf,
@@ -202,14 +208,12 @@ CompressFast := [].{
 
 			if $in_next == in_end {
 				$blocking = 0
-			} else {
-			}
+			} else {}
 		}
 
 		if $bitcount > 0 {
 			$out = List.append($out, $bitbuf.to_u8_wrap())
-		} else {
-		}
+		} else {}
 		Ok($out)
 	}
 }
