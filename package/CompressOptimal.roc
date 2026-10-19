@@ -67,10 +67,17 @@ CompressOptimal := [].{
 	cache_entries_per_position : U64
 	cache_entries_per_position = CompressOptimal.max_matches_per_pos + DeflateTables.max_match_len
 
+	## Cache entries to start with per input byte. Each position takes one
+	## entry for its header and one per match, and text-like data comes to
+	## between two and four entries a byte, so starting at four means the
+	## cache rarely has to grow.
+	initial_entries_per_byte : U64
+	initial_entries_per_byte = 4
+
 	## The cache's starting length for an input of `in_end` bytes.
 	initial_cache_size : U64 -> U64
 	initial_cache_size = |in_end|
-		(in_end + CompressOptimal.cache_entries_per_position).min(CompressOptimal.match_cache_size)
+		(CompressOptimal.initial_entries_per_byte * in_end + CompressOptimal.cache_entries_per_position).min(CompressOptimal.match_cache_size)
 
 	## Lengthen a match cache to at least `needed` entries, at least doubling
 	## it so that growth stays linear overall, but never past its fixed size.
@@ -649,7 +656,7 @@ CompressOptimal := [].{
 		var $nh3 = 0.U64
 		var $nh4 = 0.U64
 
-		# The match cache starts at one entry per input byte plus one
+		# The match cache starts at a few entries per input byte plus one
 		# position's worst case, and grows (doubling, up to its fixed size) only
 		# when a position might not fit; a short input then never pays for the
 		# full-size cache. The node tables need one entry per position of the
