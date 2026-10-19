@@ -107,31 +107,45 @@ BlockOut := [].{
 	}
 
 	## Storage the writer reuses from block to block, which libdeflate keeps in
-	## its compressor struct: the code builder's scratch, the precode and its
-	## items, and the packed tables the symbol writer reads. A parser makes one
-	## with [BlockOut.init_scratch] per stream and threads it through every
-	## block, so writing a block allocates nothing.
+	## its compressor struct. A parser makes one with [BlockOut.init_scratch]
+	## per stream and threads it through every block, so writing a block
+	## allocates nothing.
+	##
+	## Besides the precode, everything lives in one list of words, each table
+	## in a region of its own: the code builder's scratch (see
+	## [HuffmanEncode.init_scratch]) at the start, then the precode items,
+	## then the packed tables the symbol writer reads.
 	Scratch : {
-		huffman : List(U64),
+		words : List(U64),
 		precode_freqs : List(U32),
 		precode_lens : List(U8),
 		precode_codewords : List(U32),
-		precode_items : List(U32),
-		packed_litlen : List(U64),
-		packed_lengths : List(U64),
-		packed_offsets : List(U64),
 	}
+
+	## Where each table starts in the scratch words.
+	precode_items_at : U64
+	precode_items_at = DeflateTables.num_litlen_syms
+
+	## A precode item per codeword length at most.
+	packed_litlen_at : U64
+	packed_litlen_at = BlockOut.precode_items_at + DeflateTables.num_litlen_syms + DeflateTables.num_offset_syms
+
+	## One entry per match length, indexed by the length itself.
+	packed_lengths_at : U64
+	packed_lengths_at = BlockOut.packed_litlen_at + DeflateTables.num_litlen_syms
+
+	packed_offsets_at : U64
+	packed_offsets_at = BlockOut.packed_lengths_at + DeflateTables.max_match_len + 1
+
+	scratch_words_len : U64
+	scratch_words_len = BlockOut.packed_offsets_at + DeflateTables.num_offset_syms
 
 	init_scratch : {} -> Scratch
 	init_scratch = |{}| {
-		huffman: HuffmanEncode.init_scratch({}),
+		words: List.repeat(0.U64, BlockOut.scratch_words_len),
 		precode_freqs: List.repeat(0.U32, DeflateTables.num_precode_syms),
 		precode_lens: List.repeat(0.U8, DeflateTables.num_precode_syms),
 		precode_codewords: List.repeat(0.U32, DeflateTables.num_precode_syms),
-		precode_items: List.repeat(0.U32, DeflateTables.num_litlen_syms + DeflateTables.num_offset_syms),
-		packed_litlen: List.repeat(0.U64, DeflateTables.num_litlen_syms),
-		packed_lengths: List.repeat(0.U64, DeflateTables.max_match_len + 1),
-		packed_offsets: List.repeat(0.U64, DeflateTables.num_offset_syms),
 	}
 
 	## Storage for one block's codes, to be filled by [BlockOut.make_codes].
@@ -151,14 +165,14 @@ BlockOut := [].{
 	make_codes : List(U32), List(U32), Codes, Scratch -> Try(BuiltCodes, [CompressBug])
 	make_codes = |freqs_litlen, freqs_offset, codes, scratch| {
 		{ litlen_lens, litlen_codewords, offset_lens, offset_codewords } = codes
-		{ huffman, precode_freqs, precode_lens, precode_codewords, precode_items, packed_litlen, packed_lengths, packed_offsets } = scratch
+		{ words, precode_freqs, precode_lens, precode_codewords } = scratch
 		litlen = HuffmanEncode.make_code(
 			DeflateTables.num_litlen_syms,
 			BlockOut.max_litlen_codeword_len,
 			freqs_litlen,
 			litlen_lens,
 			litlen_codewords,
-			huffman,
+			words,
 		)?
 		offset = HuffmanEncode.make_code(
 			DeflateTables.num_offset_syms,
@@ -176,14 +190,10 @@ BlockOut := [].{
 				offset_codewords: offset.codewords,
 			},
 			scratch: {
-				huffman: offset.scratch,
+				words: offset.scratch,
 				precode_freqs,
 				precode_lens,
 				precode_codewords,
-				precode_items,
-				packed_litlen,
-				packed_lengths,
-				packed_offsets,
 			},
 		})
 	}
@@ -228,11 +238,12 @@ BlockOut := [].{
 	## items, counting how often each precode symbol is used.
 	##
 	## Each item carries its precode symbol in the low five bits and any extra
-	## bits above them.
-	compute_precode_items : List(U8), List(U8), U64, U64, List(U32), List(U32) -> Try({ freqs : List(U32), items : List(U32), num_items : U64 }, [CompressBug])
-	compute_precode_items = |litlen_lens, offset_lens, num_litlen_syms, num_lens, freqs0, items0| {
+	## bits above them. The items go into the scratch words from
+	## [BlockOut.precode_items_at].
+	compute_precode_items : List(U8), List(U8), U64, U64, List(U32), List(U64) -> Try({ freqs : List(U32), words : List(U64), num_items : U64 }, [CompressBug])
+	compute_precode_items = |litlen_lens, offset_lens, num_litlen_syms, num_lens, freqs0, words0| {
 		var $freqs = freqs0
-		var $items = items0
+		var $words = words0
 		var $num_items = 0.U64
 		var $run_start = 0.U64
 
@@ -263,7 +274,7 @@ BlockOut := [].{
 						Ok(next) => next
 						Err(_) => return Err(CompressBug)
 					}
-					$items = match List.set($items, $num_items, (18.U32).bitwise_or(extra.to_u32_wrap().shl_wrap(5))) {
+					$words = match List.set($words, BlockOut.precode_items_at + $num_items, (18.U32).bitwise_or(extra.to_u32_wrap().shl_wrap(5)).to_u64()) {
 						Ok(next) => next
 						Err(_) => return Err(CompressBug)
 					}
@@ -277,7 +288,7 @@ BlockOut := [].{
 						Ok(next) => next
 						Err(_) => return Err(CompressBug)
 					}
-					$items = match List.set($items, $num_items, (17.U32).bitwise_or(extra.to_u32_wrap().shl_wrap(5))) {
+					$words = match List.set($words, BlockOut.precode_items_at + $num_items, (17.U32).bitwise_or(extra.to_u32_wrap().shl_wrap(5)).to_u64()) {
 						Ok(next) => next
 						Err(_) => return Err(CompressBug)
 					}
@@ -292,7 +303,7 @@ BlockOut := [].{
 						Ok(next) => next
 						Err(_) => return Err(CompressBug)
 					}
-					$items = match List.set($items, $num_items, len.to_u32()) {
+					$words = match List.set($words, BlockOut.precode_items_at + $num_items, len.to_u64()) {
 						Ok(next) => next
 						Err(_) => return Err(CompressBug)
 					}
@@ -306,7 +317,7 @@ BlockOut := [].{
 							Ok(next) => next
 							Err(_) => return Err(CompressBug)
 						}
-						$items = match List.set($items, $num_items, (16.U32).bitwise_or(extra.to_u32_wrap().shl_wrap(5))) {
+						$words = match List.set($words, BlockOut.precode_items_at + $num_items, (16.U32).bitwise_or(extra.to_u32_wrap().shl_wrap(5)).to_u64()) {
 							Ok(next) => next
 							Err(_) => return Err(CompressBug)
 						}
@@ -325,7 +336,7 @@ BlockOut := [].{
 					Ok(next) => next
 					Err(_) => return Err(CompressBug)
 				}
-				$items = match List.set($items, $num_items, len.to_u32()) {
+				$words = match List.set($words, BlockOut.precode_items_at + $num_items, len.to_u64()) {
 					Ok(next) => next
 					Err(_) => return Err(CompressBug)
 				}
@@ -333,7 +344,7 @@ BlockOut := [].{
 				$run_start = $run_start + 1
 			}
 		}
-		Ok({ freqs: $freqs, items: $items, num_items: $num_items })
+		Ok({ freqs: $freqs, words: $words, num_items: $num_items })
 	}
 
 	## Work out everything the dynamic Huffman header needs: how many litlen
@@ -341,7 +352,7 @@ BlockOut := [].{
 	## the precode itself.
 	precompute_huffman_header : List(U8), List(U8), Scratch -> Try(PrecodeInfo, [CompressBug])
 	precompute_huffman_header = |litlen_lens, offset_lens, scratch| {
-		{ huffman, precode_freqs, precode_lens, precode_codewords, precode_items, packed_litlen, packed_lengths, packed_offsets } = scratch
+		{ words, precode_freqs, precode_lens, precode_codewords } = scratch
 
 		# Trailing unused symbols need not be sent.
 		var $num_litlen_syms = DeflateTables.num_litlen_syms
@@ -370,7 +381,7 @@ BlockOut := [].{
 			$num_litlen_syms,
 			$num_litlen_syms + $num_offset_syms,
 			precode_freqs,
-			precode_items,
+			words,
 		)?
 
 		precode = HuffmanEncode.make_code(
@@ -379,7 +390,7 @@ BlockOut := [].{
 			computed.freqs,
 			precode_lens,
 			precode_codewords,
-			huffman,
+			computed.words,
 		)?
 
 		# Trailing zero precode lengths need not be sent either.
@@ -396,14 +407,10 @@ BlockOut := [].{
 
 		Ok({
 			scratch: {
-				huffman: precode.scratch,
+				words: precode.scratch,
 				precode_freqs: computed.freqs,
 				precode_lens: precode.lens,
 				precode_codewords: precode.codewords,
-				precode_items: computed.items,
-				packed_litlen,
-				packed_lengths,
-				packed_offsets,
 			},
 			num_items: computed.num_items,
 			num_litlen_syms: $num_litlen_syms,
@@ -415,11 +422,11 @@ BlockOut := [].{
 	## Concatenate each match length's litlen codeword with its extra bits, so
 	## writing a match is one table lookup rather than a slot lookup plus two
 	## assembles. Each entry is packed as [BlockOut.pack_codes] packs one, the
-	## codeword in the low half and its length above it, into `packed`, which
-	## holds one entry per match length.
+	## codeword in the low half and its length above it, into the scratch
+	## words from [BlockOut.packed_lengths_at].
 	pack_lengths : List(U64), List(U8), List(U32) -> Try(List(U64), [CompressBug])
-	pack_lengths = |packed, litlen_lens, litlen_codewords| {
-		var $packed = packed
+	pack_lengths = |words, litlen_lens, litlen_codewords| {
+		var $packed = words
 		var $len = DeflateTables.min_match_len
 		while $len <= DeflateTables.max_match_len {
 			slot = DeflateTables.length_slot($len)
@@ -429,7 +436,7 @@ BlockOut := [].{
 			codeword = (List.get(litlen_codewords, litlen_sym) ?? 0)
 				.bitwise_or(extra_bits.shl_wrap(sym_len))
 			full_len = sym_len + (List.get(DeflateTables.extra_length_bits, slot) ?? 0)
-			$packed = match List.set($packed, $len, codeword.to_u64().bitwise_or(full_len.to_u64().shl_wrap(32))) {
+			$packed = match List.set($packed, BlockOut.packed_lengths_at + $len, codeword.to_u64().bitwise_or(full_len.to_u64().shl_wrap(32))) {
 				Ok(next) => next
 				Err(_) => return Err(CompressBug)
 			}
@@ -465,15 +472,16 @@ BlockOut := [].{
 	## path; `use_items` selects between them.
 	## A codeword and its length in one word: the codeword in the low half
 	## and the length above it. The writer then looks each symbol up once and
-	## keeps one table live instead of two. `packed` has room for every code.
+	## keeps one table live instead of two. The litlen table goes into the
+	## scratch words from [BlockOut.packed_litlen_at].
 	pack_codes : List(U64), List(U32), List(U8) -> Try(List(U64), [CompressBug])
-	pack_codes = |packed, codewords, lens| {
+	pack_codes = |words, codewords, lens| {
 		n = List.len(codewords)
-		var $packed = packed
+		var $packed = words
 		var $i = 0.U64
 		while $i < n {
 			word = (List.get(codewords, $i) ?? 0).to_u64().bitwise_or((List.get(lens, $i) ?? 0).to_u64().shl_wrap(32))
-			$packed = match List.set($packed, $i, word) {
+			$packed = match List.set($packed, BlockOut.packed_litlen_at + $i, word) {
 				Ok(next) => next
 				Err(_) => return Err(CompressBug)
 			}
@@ -484,18 +492,19 @@ BlockOut := [].{
 
 	## Everything a match's offset needs in one word: the codeword in the low
 	## 16 bits, its length above that, the extra bit count above that, and the
-	## slot's base offset in the high half.
+	## slot's base offset in the high half. The table goes into the scratch
+	## words from [BlockOut.packed_offsets_at].
 	pack_offsets : List(U64), List(U32), List(U8) -> Try(List(U64), [CompressBug])
-	pack_offsets = |packed, codewords, lens| {
+	pack_offsets = |words, codewords, lens| {
 		n = List.len(codewords)
-		var $packed = packed
+		var $packed = words
 		var $i = 0.U64
 		while $i < n {
 			word = (List.get(codewords, $i) ?? 0).to_u64()
 				.bitwise_or((List.get(lens, $i) ?? 0).to_u64().shl_wrap(16))
 				.bitwise_or((List.get(DeflateTables.extra_offset_bits, $i) ?? 0).to_u64().shl_wrap(24))
 				.bitwise_or((List.get(DeflateTables.offset_slot_base, $i) ?? 0).to_u64().shl_wrap(32))
-			$packed = match List.set($packed, $i, word) {
+			$packed = match List.set($packed, BlockOut.packed_offsets_at + $i, word) {
 				Ok(next) => next
 				Err(_) => return Err(CompressBug)
 			}
@@ -690,7 +699,7 @@ BlockOut := [].{
 				# Then the litlen and offset lengths, precode-encoded.
 				$i = 0
 				while $i < header.num_items {
-					item = List.get(precode.precode_items, $i) ?? 0
+					item = (List.get(precode.words, BlockOut.precode_items_at + $i) ?? 0).to_u32_wrap()
 					precode_sym = item.bitwise_and(0x1F).to_u64()
 					$bitbuf = $bitbuf.bitwise_or((List.get(precode.precode_codewords, precode_sym) ?? 0).to_u64().shl_wrap($bitcount.to_u8_wrap()))
 					$bitcount = $bitcount + (List.get(precode.precode_lens, precode_sym) ?? 0).to_u64()
@@ -727,15 +736,17 @@ BlockOut := [].{
 			} else {
 				offset_codewords
 			}
-			# The tables the symbol writer reads go into the scratch, which is
-			# taken apart here so that each table is filled in place.
-			{ huffman, precode_freqs, precode_lens, precode_codewords, precode_items, packed_litlen: packed_litlen_0, packed_lengths: packed_lengths_0, packed_offsets: packed_offsets_0 } = header.scratch
-			packed_full = BlockOut.pack_lengths(packed_lengths_0, w_litlen_lens, w_litlen_codewords)?
-			packed_litlen = BlockOut.pack_codes(packed_litlen_0, w_litlen_codewords, w_litlen_lens)?
-			packed_offset = BlockOut.pack_offsets(packed_offsets_0, w_offset_codewords, w_offset_lens)?
-			# A match length indexes its packed table directly, so establishing
-			# the table's length once lets those reads skip their bounds tests.
-			if List.len(packed_full) < DeflateTables.max_match_len + 1 {
+			# The tables the symbol writer reads go into the scratch words,
+			# which are taken out of the scratch so that they are filled in
+			# place.
+			{ words: words_0, precode_freqs, precode_lens, precode_codewords } = header.scratch
+			words_1 = BlockOut.pack_lengths(words_0, w_litlen_lens, w_litlen_codewords)?
+			words_2 = BlockOut.pack_codes(words_1, w_litlen_codewords, w_litlen_lens)?
+			words = BlockOut.pack_offsets(words_2, w_offset_codewords, w_offset_lens)?
+			# A literal or a match length indexes its packed table directly, so
+			# establishing the words' length once here lets the bounds test on
+			# every lookup fold away instead of running per symbol.
+			if List.len(words) < BlockOut.scratch_words_len {
 				return Err(CompressBug)
 			} else {}
 
@@ -765,7 +776,7 @@ BlockOut := [].{
 					$bitcount = $bitcount.bitwise_and(7)
 				} else {
 					offset_slot = DeflateTables.offset_slot(payload)
-					packed_len = List.get(packed_full, length) ?? 0
+					packed_len = List.get(words, BlockOut.packed_lengths_at.plus_wrap(length)) ?? 0
 					$bitbuf = $bitbuf.bitwise_or(packed_len.bitwise_and(0xFFFF_FFFF).shl_wrap($bitcount.to_u8_wrap()))
 					$bitcount = $bitcount.plus_wrap(packed_len.shr_zf_wrap(32))
 					$bitbuf = $bitbuf.bitwise_or((List.get(w_offset_codewords, offset_slot) ?? 0).to_u64().shl_wrap($bitcount.to_u8_wrap()))
@@ -782,13 +793,6 @@ BlockOut := [].{
 				}
 				$item_at = $item_at.plus_wrap(length)
 			}
-
-			# A literal indexes the packed table by its byte, so establishing
-			# the table's length once here lets the bounds test on every
-			# literal's lookup fold away instead of running per symbol.
-			if List.len(packed_litlen) < DeflateTables.num_literals {
-				return Err(CompressBug)
-			} else {}
 
 			# Wrapping arithmetic on the per-symbol path: the bit count never
 			# exceeds the buffer's width between flushes, the cursor never
@@ -810,19 +814,19 @@ BlockOut := [].{
 					# read is in bounds, and one bounds test replaces four.
 					word = U32.from_le_bytes(input, $in_next) ?? 0
 					lit0 = word.bitwise_and(0xFF).to_u64()
-					packed0 = List.get(packed_litlen, lit0) ?? 0
+					packed0 = List.get(words, BlockOut.packed_litlen_at.plus_wrap(lit0)) ?? 0
 					$bitbuf = $bitbuf.bitwise_or(packed0.bitwise_and(0xFFFF_FFFF).shl_wrap($bitcount.to_u8_wrap()))
 					$bitcount = $bitcount.plus_wrap(packed0.shr_zf_wrap(32))
 					lit1 = word.shr_zf_wrap(8).bitwise_and(0xFF).to_u64()
-					packed1 = List.get(packed_litlen, lit1) ?? 0
+					packed1 = List.get(words, BlockOut.packed_litlen_at.plus_wrap(lit1)) ?? 0
 					$bitbuf = $bitbuf.bitwise_or(packed1.bitwise_and(0xFFFF_FFFF).shl_wrap($bitcount.to_u8_wrap()))
 					$bitcount = $bitcount.plus_wrap(packed1.shr_zf_wrap(32))
 					lit2 = word.shr_zf_wrap(16).bitwise_and(0xFF).to_u64()
-					packed2 = List.get(packed_litlen, lit2) ?? 0
+					packed2 = List.get(words, BlockOut.packed_litlen_at.plus_wrap(lit2)) ?? 0
 					$bitbuf = $bitbuf.bitwise_or(packed2.bitwise_and(0xFFFF_FFFF).shl_wrap($bitcount.to_u8_wrap()))
 					$bitcount = $bitcount.plus_wrap(packed2.shr_zf_wrap(32))
 					lit3 = word.shr_zf_wrap(24).to_u64()
-					packed3 = List.get(packed_litlen, lit3) ?? 0
+					packed3 = List.get(words, BlockOut.packed_litlen_at.plus_wrap(lit3)) ?? 0
 					$bitbuf = $bitbuf.bitwise_or(packed3.bitwise_and(0xFFFF_FFFF).shl_wrap($bitcount.to_u8_wrap()))
 					$bitcount = $bitcount.plus_wrap(packed3.shr_zf_wrap(32))
 					$in_next = $in_next.plus_wrap(4)
@@ -837,19 +841,19 @@ BlockOut := [].{
 				}
 				if $litrunlen != 0 {
 					lit0 = (List.get(input, $in_next) ?? 0).to_u64()
-					packed0 = List.get(packed_litlen, lit0) ?? 0
+					packed0 = List.get(words, BlockOut.packed_litlen_at.plus_wrap(lit0)) ?? 0
 					$bitbuf = $bitbuf.bitwise_or(packed0.bitwise_and(0xFFFF_FFFF).shl_wrap($bitcount.to_u8_wrap()))
 					$bitcount = $bitcount.plus_wrap(packed0.shr_zf_wrap(32))
 					$in_next = $in_next.plus_wrap(1)
 					if $litrunlen >= 2 {
 						lit1 = (List.get(input, $in_next) ?? 0).to_u64()
-						packed1 = List.get(packed_litlen, lit1) ?? 0
+						packed1 = List.get(words, BlockOut.packed_litlen_at.plus_wrap(lit1)) ?? 0
 						$bitbuf = $bitbuf.bitwise_or(packed1.bitwise_and(0xFFFF_FFFF).shl_wrap($bitcount.to_u8_wrap()))
 						$bitcount = $bitcount.plus_wrap(packed1.shr_zf_wrap(32))
 						$in_next = $in_next.plus_wrap(1)
 						if $litrunlen >= 3 {
 							lit2 = (List.get(input, $in_next) ?? 0).to_u64()
-							packed2 = List.get(packed_litlen, lit2) ?? 0
+							packed2 = List.get(words, BlockOut.packed_litlen_at.plus_wrap(lit2)) ?? 0
 							$bitbuf = $bitbuf.bitwise_or(packed2.bitwise_and(0xFFFF_FFFF).shl_wrap($bitcount.to_u8_wrap()))
 							$bitcount = $bitcount.plus_wrap(packed2.shr_zf_wrap(32))
 							$in_next = $in_next.plus_wrap(1)
@@ -872,10 +876,10 @@ BlockOut := [].{
 					# extra offset bits come to at most 47 bits.
 					offset = seq.offset.to_u64()
 					offset_slot = seq.offset_slot.to_u64()
-					packed_len = List.get(packed_full, length) ?? 0
+					packed_len = List.get(words, BlockOut.packed_lengths_at.plus_wrap(length)) ?? 0
 					$bitbuf = $bitbuf.bitwise_or(packed_len.bitwise_and(0xFFFF_FFFF).shl_wrap($bitcount.to_u8_wrap()))
 					$bitcount = $bitcount.plus_wrap(packed_len.shr_zf_wrap(32))
-					packed_off = List.get(packed_offset, offset_slot) ?? 0
+					packed_off = List.get(words, BlockOut.packed_offsets_at.plus_wrap(offset_slot)) ?? 0
 					$bitbuf = $bitbuf.bitwise_or(packed_off.bitwise_and(0xFFFF).shl_wrap($bitcount.to_u8_wrap()))
 					$bitcount = $bitcount.plus_wrap(packed_off.shr_zf_wrap(16).bitwise_and(0xFF))
 					$bitbuf = $bitbuf.bitwise_or(offset.minus_wrap(packed_off.shr_zf_wrap(32)).shl_wrap($bitcount.to_u8_wrap()))
@@ -910,14 +914,10 @@ BlockOut := [].{
 				seqs,
 				items,
 				scratch: {
-					huffman,
+					words,
 					precode_freqs,
 					precode_lens,
 					precode_codewords,
-					precode_items,
-					packed_litlen,
-					packed_lengths: packed_full,
-					packed_offsets: packed_offset,
 				},
 			})
 		}
