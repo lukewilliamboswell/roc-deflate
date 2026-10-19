@@ -1,1 +1,1 @@
-package [Deflate, Inflate, DeflateTables, HuffmanEncode, BlockOut, Matchfinder, HcMatchfinder, HtMatchfinder, CompressLazy, CompressFast, BtMatchfinder, CompressOptimal] {}
+package [BlockOut, BtMatchfinder, CompressFast, CompressLazy, CompressOptimal, Deflate, DeflateTables, HcMatchfinder, HtMatchfinder, HuffmanEncode, Inflate, Matchfinder] {}

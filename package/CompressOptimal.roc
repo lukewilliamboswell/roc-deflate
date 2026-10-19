@@ -117,70 +117,17 @@ CompressOptimal := [].{
 	## Within a table the cost is `-log2((1 - match_prob) / num_used_literals)`,
 	## so literals get cheaper as fewer distinct ones appear.
 	default_lit_cost_0 : List(U8)
-	default_lit_cost_0 = [
-		6, 6, 22, 32, 38, 43, 48, 51, 54, 57, 59, 61, 64, 65, 67, 69,
-		70, 72, 73, 74, 75, 76, 77, 79, 80, 80, 81, 82, 83, 84, 85, 85,
-		86, 87, 88, 88, 89, 89, 90, 91, 91, 92, 92, 93, 93, 94, 95, 95,
-		96, 96, 96, 97, 97, 98, 98, 99, 99, 99, 100, 100, 101, 101, 101, 102,
-		102, 102, 103, 103, 104, 104, 104, 105, 105, 105, 105, 106, 106, 106, 107, 107,
-		107, 108, 108, 108, 108, 109, 109, 109, 109, 110, 110, 110, 111, 111, 111, 111,
-		112, 112, 112, 112, 112, 113, 113, 113, 113, 114, 114, 114, 114, 114, 115, 115,
-		115, 115, 115, 116, 116, 116, 116, 116, 117, 117, 117, 117, 117, 118, 118, 118,
-		118, 118, 118, 119, 119, 119, 119, 119, 120, 120, 120, 120, 120, 120, 121, 121,
-		121, 121, 121, 121, 121, 122, 122, 122, 122, 122, 122, 123, 123, 123, 123, 123,
-		123, 123, 124, 124, 124, 124, 124, 124, 124, 125, 125, 125, 125, 125, 125, 125,
-		125, 126, 126, 126, 126, 126, 126, 126, 127, 127, 127, 127, 127, 127, 127, 127,
-		128, 128, 128, 128, 128, 128, 128, 128, 128, 129, 129, 129, 129, 129, 129, 129,
-		129, 129, 130, 130, 130, 130, 130, 130, 130, 130, 130, 131, 131, 131, 131, 131,
-		131, 131, 131, 131, 131, 132, 132, 132, 132, 132, 132, 132, 132, 132, 132, 133,
-		133, 133, 133, 133, 133, 133, 133, 133, 133, 134, 134, 134, 134, 134, 134, 134,
-		134
-	]
+	default_lit_cost_0 = [6, 6, 22, 32, 38, 43, 48, 51, 54, 57, 59, 61, 64, 65, 67, 69, 70, 72, 73, 74, 75, 76, 77, 79, 80, 80, 81, 82, 83, 84, 85, 85, 86, 87, 88, 88, 89, 89, 90, 91, 91, 92, 92, 93, 93, 94, 95, 95, 96, 96, 96, 97, 97, 98, 98, 99, 99, 99, 100, 100, 101, 101, 101, 102, 102, 102, 103, 103, 104, 104, 104, 105, 105, 105, 105, 106, 106, 106, 107, 107, 107, 108, 108, 108, 108, 109, 109, 109, 109, 110, 110, 110, 111, 111, 111, 111, 112, 112, 112, 112, 112, 113, 113, 113, 113, 114, 114, 114, 114, 114, 115, 115, 115, 115, 115, 116, 116, 116, 116, 116, 117, 117, 117, 117, 117, 118, 118, 118, 118, 118, 118, 119, 119, 119, 119, 119, 120, 120, 120, 120, 120, 120, 121, 121, 121, 121, 121, 121, 121, 122, 122, 122, 122, 122, 122, 123, 123, 123, 123, 123, 123, 123, 124, 124, 124, 124, 124, 124, 124, 125, 125, 125, 125, 125, 125, 125, 125, 126, 126, 126, 126, 126, 126, 126, 127, 127, 127, 127, 127, 127, 127, 127, 128, 128, 128, 128, 128, 128, 128, 128, 128, 129, 129, 129, 129, 129, 129, 129, 129, 129, 130, 130, 130, 130, 130, 130, 130, 130, 130, 131, 131, 131, 131, 131, 131, 131, 131, 131, 131, 132, 132, 132, 132, 132, 132, 132, 132, 132, 132, 133, 133, 133, 133, 133, 133, 133, 133, 133, 133, 134, 134, 134, 134, 134, 134, 134, 134]
 
 	default_lit_cost_1 : List(U8)
-	default_lit_cost_1 = [
-		16, 16, 32, 41, 48, 53, 57, 60, 64, 66, 69, 71, 73, 75, 76, 78,
-		80, 81, 82, 83, 85, 86, 87, 88, 89, 90, 91, 92, 92, 93, 94, 95,
-		96, 96, 97, 98, 98, 99, 99, 100, 101, 101, 102, 102, 103, 103, 104, 104,
-		105, 105, 106, 106, 107, 107, 108, 108, 108, 109, 109, 110, 110, 110, 111, 111,
-		112, 112, 112, 113, 113, 113, 114, 114, 114, 115, 115, 115, 115, 116, 116, 116,
-		117, 117, 117, 118, 118, 118, 118, 119, 119, 119, 119, 120, 120, 120, 120, 121,
-		121, 121, 121, 122, 122, 122, 122, 122, 123, 123, 123, 123, 124, 124, 124, 124,
-		124, 125, 125, 125, 125, 125, 126, 126, 126, 126, 126, 127, 127, 127, 127, 127,
-		128, 128, 128, 128, 128, 128, 129, 129, 129, 129, 129, 129, 130, 130, 130, 130,
-		130, 130, 131, 131, 131, 131, 131, 131, 131, 132, 132, 132, 132, 132, 132, 133,
-		133, 133, 133, 133, 133, 133, 134, 134, 134, 134, 134, 134, 134, 134, 135, 135,
-		135, 135, 135, 135, 135, 135, 136, 136, 136, 136, 136, 136, 136, 136, 137, 137,
-		137, 137, 137, 137, 137, 137, 138, 138, 138, 138, 138, 138, 138, 138, 138, 139,
-		139, 139, 139, 139, 139, 139, 139, 139, 140, 140, 140, 140, 140, 140, 140, 140,
-		140, 141, 141, 141, 141, 141, 141, 141, 141, 141, 141, 142, 142, 142, 142, 142,
-		142, 142, 142, 142, 142, 142, 143, 143, 143, 143, 143, 143, 143, 143, 143, 143,
-		144
-	]
+	default_lit_cost_1 = [16, 16, 32, 41, 48, 53, 57, 60, 64, 66, 69, 71, 73, 75, 76, 78, 80, 81, 82, 83, 85, 86, 87, 88, 89, 90, 91, 92, 92, 93, 94, 95, 96, 96, 97, 98, 98, 99, 99, 100, 101, 101, 102, 102, 103, 103, 104, 104, 105, 105, 106, 106, 107, 107, 108, 108, 108, 109, 109, 110, 110, 110, 111, 111, 112, 112, 112, 113, 113, 113, 114, 114, 114, 115, 115, 115, 115, 116, 116, 116, 117, 117, 117, 118, 118, 118, 118, 119, 119, 119, 119, 120, 120, 120, 120, 121, 121, 121, 121, 122, 122, 122, 122, 122, 123, 123, 123, 123, 124, 124, 124, 124, 124, 125, 125, 125, 125, 125, 126, 126, 126, 126, 126, 127, 127, 127, 127, 127, 128, 128, 128, 128, 128, 128, 129, 129, 129, 129, 129, 129, 130, 130, 130, 130, 130, 130, 131, 131, 131, 131, 131, 131, 131, 132, 132, 132, 132, 132, 132, 133, 133, 133, 133, 133, 133, 133, 134, 134, 134, 134, 134, 134, 134, 134, 135, 135, 135, 135, 135, 135, 135, 135, 136, 136, 136, 136, 136, 136, 136, 136, 137, 137, 137, 137, 137, 137, 137, 137, 138, 138, 138, 138, 138, 138, 138, 138, 138, 139, 139, 139, 139, 139, 139, 139, 139, 139, 140, 140, 140, 140, 140, 140, 140, 140, 140, 141, 141, 141, 141, 141, 141, 141, 141, 141, 141, 142, 142, 142, 142, 142, 142, 142, 142, 142, 142, 142, 143, 143, 143, 143, 143, 143, 143, 143, 143, 143, 144]
 
 	default_lit_cost_2 : List(U8)
-	default_lit_cost_2 = [
-		32, 32, 48, 57, 64, 69, 73, 76, 80, 82, 85, 87, 89, 91, 92, 94,
-		96, 97, 98, 99, 101, 102, 103, 104, 105, 106, 107, 108, 108, 109, 110, 111,
-		112, 112, 113, 114, 114, 115, 115, 116, 117, 117, 118, 118, 119, 119, 120, 120,
-		121, 121, 122, 122, 123, 123, 124, 124, 124, 125, 125, 126, 126, 126, 127, 127,
-		128, 128, 128, 129, 129, 129, 130, 130, 130, 131, 131, 131, 131, 132, 132, 132,
-		133, 133, 133, 134, 134, 134, 134, 135, 135, 135, 135, 136, 136, 136, 136, 137,
-		137, 137, 137, 138, 138, 138, 138, 138, 139, 139, 139, 139, 140, 140, 140, 140,
-		140, 141, 141, 141, 141, 141, 142, 142, 142, 142, 142, 143, 143, 143, 143, 143,
-		144, 144, 144, 144, 144, 144, 145, 145, 145, 145, 145, 145, 146, 146, 146, 146,
-		146, 146, 147, 147, 147, 147, 147, 147, 147, 148, 148, 148, 148, 148, 148, 149,
-		149, 149, 149, 149, 149, 149, 150, 150, 150, 150, 150, 150, 150, 150, 151, 151,
-		151, 151, 151, 151, 151, 151, 152, 152, 152, 152, 152, 152, 152, 152, 153, 153,
-		153, 153, 153, 153, 153, 153, 154, 154, 154, 154, 154, 154, 154, 154, 154, 155,
-		155, 155, 155, 155, 155, 155, 155, 155, 156, 156, 156, 156, 156, 156, 156, 156,
-		156, 157, 157, 157, 157, 157, 157, 157, 157, 157, 157, 158, 158, 158, 158, 158,
-		158, 158, 158, 158, 158, 158, 159, 159, 159, 159, 159, 159, 159, 159, 159, 159,
-		160
-	]
+	default_lit_cost_2 = [32, 32, 48, 57, 64, 69, 73, 76, 80, 82, 85, 87, 89, 91, 92, 94, 96, 97, 98, 99, 101, 102, 103, 104, 105, 106, 107, 108, 108, 109, 110, 111, 112, 112, 113, 114, 114, 115, 115, 116, 117, 117, 118, 118, 119, 119, 120, 120, 121, 121, 122, 122, 123, 123, 124, 124, 124, 125, 125, 126, 126, 126, 127, 127, 128, 128, 128, 129, 129, 129, 130, 130, 130, 131, 131, 131, 131, 132, 132, 132, 133, 133, 133, 134, 134, 134, 134, 135, 135, 135, 135, 136, 136, 136, 136, 137, 137, 137, 137, 138, 138, 138, 138, 138, 139, 139, 139, 139, 140, 140, 140, 140, 140, 141, 141, 141, 141, 141, 142, 142, 142, 142, 142, 143, 143, 143, 143, 143, 144, 144, 144, 144, 144, 144, 145, 145, 145, 145, 145, 145, 146, 146, 146, 146, 146, 146, 147, 147, 147, 147, 147, 147, 147, 148, 148, 148, 148, 148, 148, 149, 149, 149, 149, 149, 149, 149, 150, 150, 150, 150, 150, 150, 150, 150, 151, 151, 151, 151, 151, 151, 151, 151, 152, 152, 152, 152, 152, 152, 152, 152, 153, 153, 153, 153, 153, 153, 153, 153, 154, 154, 154, 154, 154, 154, 154, 154, 154, 155, 155, 155, 155, 155, 155, 155, 155, 155, 156, 156, 156, 156, 156, 156, 156, 156, 156, 157, 157, 157, 157, 157, 157, 157, 157, 157, 157, 158, 158, 158, 158, 158, 158, 158, 158, 158, 158, 158, 159, 159, 159, 159, 159, 159, 159, 159, 159, 159, 160]
 
 	default_len_sym_costs : List(U8)
 	default_len_sym_costs = [109, 93, 84]
+
 	## Cost model for one block, all in sixteenths of a bit.
 	Costs : { literal : List(U32), length : List(U32), offset_slot : List(U32) }
 
@@ -194,7 +141,11 @@ CompressOptimal := [].{
 		var $i = 0.U64
 		while $i < DeflateTables.num_literals {
 			l = (List.get(litlen_lens, $i) ?? 0).to_u64()
-			bits = if l != 0 { l } else { CompressOptimal.literal_nostat_bits }
+			bits = if l != 0 {
+				l
+			} else {
+				CompressOptimal.literal_nostat_bits
+			}
 			$literal = match List.set($literal, $i, (bits * CompressOptimal.bit_cost).to_u32_wrap()) {
 				Ok(next) => next
 				Err(_) => return Err(CompressBug)
@@ -207,7 +158,11 @@ CompressOptimal := [].{
 			slot = DeflateTables.length_slot($i)
 			sym = DeflateTables.first_len_sym + slot
 			l = (List.get(litlen_lens, sym) ?? 0).to_u64()
-			bits = if l != 0 { l } else { CompressOptimal.length_nostat_bits }
+			bits = if l != 0 {
+				l
+			} else {
+				CompressOptimal.length_nostat_bits
+			}
 			total = bits + (List.get(DeflateTables.extra_length_bits, slot) ?? 0).to_u64()
 			$length = match List.set($length, $i, (total * CompressOptimal.bit_cost).to_u32_wrap()) {
 				Ok(next) => next
@@ -219,7 +174,11 @@ CompressOptimal := [].{
 		$i = 0
 		while $i < DeflateTables.num_offset_syms {
 			l = (List.get(offset_lens, $i) ?? 0).to_u64()
-			bits = if l != 0 { l } else { CompressOptimal.offset_nostat_bits }
+			bits = if l != 0 {
+				l
+			} else {
+				CompressOptimal.offset_nostat_bits
+			}
 			total = bits + (List.get(DeflateTables.extra_offset_bits, $i) ?? 0).to_u64()
 			$offset_slot = match List.set($offset_slot, $i, (total * CompressOptimal.bit_cost).to_u32_wrap()) {
 				Ok(next) => next
@@ -359,14 +318,12 @@ CompressOptimal := [].{
 		while $i < DeflateTables.num_literals {
 			if (List.get($counts, $i) ?? 0).to_u64() > cutoff {
 				$num_used_literals = $num_used_literals + 1
-			} else {
-			}
+			} else {}
 			$i = $i + 1
 		}
 		if $num_used_literals == 0 {
 			$num_used_literals = 1
-		} else {
-		}
+		} else {}
 
 		# The same minimum-match-length heuristic the greedy and lazy parsers
 		# use, so that matches too short to be worth taking are not counted.
@@ -381,8 +338,7 @@ CompressOptimal := [].{
 		}
 		if $literal_freq < 0 {
 			$literal_freq = 0
-		} else {
-		}
+		} else {}
 
 		which =
 			if $match_freq > $literal_freq {
@@ -442,8 +398,7 @@ CompressOptimal := [].{
 		# lets every per-length read below skip its bounds test.
 		if List.len(cost_length) < DeflateTables.max_match_len + 1 {
 			return Err(CompressBug)
-		} else {
-		}
+		} else {}
 		# The caller clears the node tables. Clearing them here would lose their
 		# capacity.
 		# TODO(roc-lang/roc#11934): a parameter used only by `List.clear` is
@@ -469,8 +424,7 @@ CompressOptimal := [].{
 		# stated once, every node read below is provably in bounds.
 		if List.len($node_cost) < DeflateTables.max_match_len {
 			return Err(CompressBug)
-		} else {
-		}
+		} else {}
 
 		# Wrapping arithmetic on the per-node path: the cursor and the cache
 		# pointer only step down while nonzero, a match never reaches past the
@@ -501,8 +455,7 @@ CompressOptimal := [].{
 					# the per-length table reads skip their bounds tests.
 					if this_len > DeflateTables.max_match_len or this_len < DeflateTables.min_match_len {
 						return Err(CompressBug)
-					} else {
-					}
+					} else {}
 					# Lengths run from the one after the previous match's up to
 					# this one's; the counter starts where the previous match left
 					# off so each length is costed once.
@@ -516,15 +469,13 @@ CompressOptimal := [].{
 							$best = cost_to_end
 							$item = len.to_u32_wrap()
 								.bitwise_or(offset.to_u32_wrap().shl_wrap(CompressOptimal.optimum_offset_shift))
-						} else {
-						}
+						} else {}
 						$k = $k.plus_wrap(1)
 					}
 					$m = $m.plus_wrap(1)
 				}
 				$cp = $cp.minus_wrap(num_matches)
-			} else {
-			}
+			} else {}
 
 			$node_cost = List.append($node_cost, $best)
 			$node_item = List.append($node_item, $item)
@@ -574,8 +525,7 @@ CompressOptimal := [].{
 			}
 			$at = $at + length
 		}
-		$freqs_litlen = match List.set($freqs_litlen, DeflateTables.end_of_block,
-			(List.get($freqs_litlen, DeflateTables.end_of_block) ?? 0) + 1) {
+		$freqs_litlen = match List.set($freqs_litlen, DeflateTables.end_of_block, (List.get($freqs_litlen, DeflateTables.end_of_block) ?? 0) + 1) {
 			Ok(next) => next
 			Err(_) => return Err(CompressBug)
 		}
@@ -630,8 +580,7 @@ CompressOptimal := [].{
 			}
 			$i = $i + 1
 		}
-		$freqs_litlen = match List.set($freqs_litlen, DeflateTables.end_of_block,
-			(List.get($freqs_litlen, DeflateTables.end_of_block) ?? 0) + 1) {
+		$freqs_litlen = match List.set($freqs_litlen, DeflateTables.end_of_block, (List.get($freqs_litlen, DeflateTables.end_of_block) ?? 0) + 1) {
 			Ok(next) => next
 			Err(_) => return Err(CompressBug)
 		}
@@ -806,8 +755,7 @@ CompressOptimal := [].{
 					$child = Matchfinder.rebase_nodes($child)
 					$in_cur_base = $in_next
 					$in_next_slide = $in_next.plus_wrap(remaining.min(Matchfinder.window_size))
-				} else {
-				}
+				} else {}
 
 				# One position writes at most a full set of matches and its header,
 				# then a skip of up to a maximum-length match's worth of headers.
@@ -815,15 +763,13 @@ CompressOptimal := [].{
 				if List.len($cache_len) < cache_needed {
 					$cache_len = CompressOptimal.grow_cache($cache_len, cache_needed)
 					$cache_off = CompressOptimal.grow_cache($cache_off, cache_needed)
-				} else {
-				}
+				} else {}
 				matches_at = $cache_ptr
 				var $best_len = 0.U64
 				if remaining < DeflateTables.max_match_len {
 					$max_len = remaining
 					$nice_len = $nice_len.min($max_len)
-				} else {
-				}
+				} else {}
 				if $max_len >= BtMatchfinder.required_nbytes {
 					adv = BtMatchfinder.get_matches(
 						$tab3,
@@ -851,17 +797,19 @@ CompressOptimal := [].{
 					$cache_ptr = adv.cache_ptr
 					if $cache_ptr > matches_at {
 						$best_len = (List.get($cache_len, $cache_ptr.minus_wrap(1)) ?? 0).to_u64()
-					} else {
-					}
-				} else {
-				}
+					} else {}
+				} else {}
 
 				# Statistics are sampled once per chosen item rather than once
 				# per position, so a long match counts once and not for every
 				# byte it covers.
 				if $in_next >= $next_observation {
 					if $best_len >= min_len {
-						obs = 8 + if $best_len >= 9 { 1 } else { 0 }
+						obs = 8 + if $best_len >= 9 {
+							1
+						} else {
+							0
+						}
 						obs_count = (List.get($new_observations, obs) ?? 0).plus_wrap(1)
 						$new_observations = match List.set($new_observations, obs, obs_count) {
 							Ok(next) => next
@@ -869,8 +817,7 @@ CompressOptimal := [].{
 						}
 						$num_new_observations = $num_new_observations.plus_wrap(1)
 						$next_observation = $in_next.plus_wrap($best_len)
-						$new_match_len_freqs = match List.set($new_match_len_freqs, $best_len,
-							(List.get($new_match_len_freqs, $best_len) ?? 0).plus_wrap(1)) {
+						$new_match_len_freqs = match List.set($new_match_len_freqs, $best_len, (List.get($new_match_len_freqs, $best_len) ?? 0).plus_wrap(1)) {
 							Ok(next) => next
 							Err(_) => return Err(CompressBug)
 						}
@@ -885,8 +832,7 @@ CompressOptimal := [].{
 						$num_new_observations = $num_new_observations.plus_wrap(1)
 						$next_observation = $in_next.plus_wrap(1)
 					}
-				} else {
-				}
+				} else {}
 
 				# Close the position with a header giving how many matches were
 				# written for it and the literal that starts there.
@@ -915,13 +861,11 @@ CompressOptimal := [].{
 							$child = Matchfinder.rebase_nodes($child)
 							$in_cur_base = $in_next
 							$in_next_slide = $in_next.plus_wrap(remaining2.min(Matchfinder.window_size))
-						} else {
-						}
+						} else {}
 						if remaining2 < DeflateTables.max_match_len {
 							$max_len = remaining2
 							$nice_len = $nice_len.min($max_len)
-						} else {
-						}
+						} else {}
 						if $max_len >= BtMatchfinder.required_nbytes {
 							sk = BtMatchfinder.skip_byte(
 								$tab3,
@@ -940,8 +884,7 @@ CompressOptimal := [].{
 							$child = sk.child
 							$nh3 = sk.next_hash3
 							$nh4 = sk.next_hash4
-						} else {
-						}
+						} else {}
 						$cache_len = match List.set($cache_len, $cache_ptr, 0) {
 							Ok(next) => next
 							Err(_) => return Err(CompressBug)
@@ -954,8 +897,7 @@ CompressOptimal := [].{
 						$cache_ptr = $cache_ptr.plus_wrap(1)
 						$skip = $skip.minus_wrap(1)
 					}
-				} else {
-				}
+				} else {}
 
 				if $in_next >= in_max_block_end or $cache_ptr >= CompressOptimal.match_cache_length {
 					$in_block = 0
@@ -977,13 +919,16 @@ CompressOptimal := [].{
 						$prev_end_block_check = $in_next
 						$have_prev_end_block_check = 1
 					}
-				} else {
-				}
+				} else {}
 			}
 
 			# Where the block actually ends, and where in the cache that is.
 			var $block_end = $in_next
-			var $is_final = if $in_next == in_end { 1.U64 } else { 0 }
+			var $is_final = if $in_next == in_end {
+				1.U64
+			} else {
+				0
+			}
 			var $cache_end = $cache_ptr
 			var $rewound = 0.U64
 			if $change_detected == 1 and $have_prev_end_block_check == 1 {
@@ -1012,7 +957,11 @@ CompressOptimal := [].{
 				$num_observations = ms.num_observations
 			}
 			block_length = $block_end - $in_block_begin
-			is_first = if $in_block_begin == 0 { 1.U64 } else { 0 }
+			is_first = if $in_block_begin == 0 {
+				1.U64
+			} else {
+				0
+			}
 
 			# Cost the all-literals alternative before anything else, since it
 			# is the only one that does not depend on the cost model.
@@ -1050,8 +999,7 @@ CompressOptimal := [].{
 				$node_cost = path.node_cost
 				$node_item = path.node_item
 				$static_cost = (List.last($node_cost) ?? 0).to_u64() // CompressOptimal.bit_cost + 7
-			} else {
-			}
+			} else {}
 
 			# Set the model for the first pass. A block after the first starts
 			# from the previous block's model, mixed towards the defaults by
@@ -1153,8 +1101,7 @@ CompressOptimal := [].{
 					$passes_remaining = $passes_remaining - 1
 					if $passes_remaining == 0 {
 						$optimizing = 0
-					} else {
-					}
+					} else {}
 				}
 			}
 
@@ -1179,11 +1126,15 @@ CompressOptimal := [].{
 					$cost_literal = from_codes.literal
 					$cost_length = from_codes.length
 					$cost_offset_slot = from_codes.offset_slot
-					$seqs = match List.set($seqs, 0, {
-						litrunlen_and_length: block_length.to_u32_wrap(),
-						offset: 0.U16,
-						offset_slot: 0.U16,
-					}) {
+					$seqs = match List.set(
+						$seqs,
+						0,
+						{
+							litrunlen_and_length: block_length.to_u32_wrap(),
+							offset: 0.U16,
+							offset_slot: 0.U16,
+						},
+					) {
 						Ok(next) => next
 						Err(_) => return Err(CompressBug)
 					}
@@ -1257,8 +1208,7 @@ CompressOptimal := [].{
 				$cost_literal = from_codes.literal
 				$cost_length = from_codes.length
 				$cost_offset_slot = from_codes.offset_slot
-			} else {
-			}
+			} else {}
 
 			flushed = BlockOut.flush_block(
 				$out,
@@ -1335,14 +1285,12 @@ CompressOptimal := [].{
 
 			if $in_next == in_end {
 				$blocking = 0
-			} else {
-			}
+			} else {}
 		}
 
 		if $bitcount > 0 {
 			$out = List.append($out, $bitbuf.to_u8_wrap())
-		} else {
-		}
+		} else {}
 		Ok($out)
 	}
 
@@ -1367,8 +1315,7 @@ CompressOptimal := [].{
 					Ok(next) => next
 					Err(_) => return Err(CompressBug)
 				}
-			} else {
-			}
+			} else {}
 			$i = $i + 1
 		}
 		Ok({ total: $total, fresh: $fresh })
@@ -1387,7 +1334,11 @@ CompressOptimal := [].{
 		while $i < CompressLazy.num_observation_types {
 			prev = (List.get(prev_observations, $i) ?? 0).to_u64() * num_observations
 			cur = (List.get(observations, $i) ?? 0).to_u64() * prev_num_observations
-			$total_delta = $total_delta + if prev > cur { prev - cur } else { cur - prev }
+			$total_delta = $total_delta + if prev > cur {
+				prev - cur
+			} else {
+				cur - prev
+			}
 			$i = $i + 1
 		}
 		cutoff = prev_num_observations * num_observations * 200 // 512

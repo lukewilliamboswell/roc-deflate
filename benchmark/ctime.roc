@@ -1,11 +1,11 @@
 app [main!] {
-	pf: platform "https://github.com/niclas-ahden/basic-cli/releases/download/0.22.1/DobkAk7zNyqAgqh2Riaj5c5DtWtKhd5iVYE5RFa6izcd.tar.zst",
 	deflate: "../package/main.roc",
+	pf: platform "https://github.com/roc-lang/basic-cli/releases/download/0.26.0-rc2/Gj3zVDr3qrQa6aTh7Z1zgUfe9NeBE6R76T5ho3xrc8af.tar.zst",
 }
 
 import pf.Stdout
 import pf.Path
-import pf.Utc
+import pf.Monotonic
 import deflate.Deflate
 
 # usage: ctime <original> <params> <out.deflate>
@@ -37,8 +37,7 @@ main! = |args| {
 	if back != data {
 		Stdout.line!("VERIFY FAIL") ? |_| Exit(8)
 		return Err(Exit(8))
-	} else {
-	}
+	} else {}
 	Path.write_bytes!(Path.from_os_str(out_os), first) ? |_| Exit(9)
 
 	in_len = List.len(data)
@@ -47,12 +46,12 @@ main! = |args| {
 	var $total = 0.U64
 	var $r = 0.U64
 	while $r < reps {
-		t0 = Utc.now!()
+		t0 = Monotonic.now!()
 		sz = match Deflate.compress(data, level) {
 			Ok(c) => List.len(c)
 			Err(_) => 0
 		}
-		dt = Utc.delta_as_nanos(t0, Utc.now!())
+		dt = Monotonic.now!().since(t0).to_nanos().to_u128()
 		$total = $total + sz
 		if $r == 0 or dt < $best {
 			$best = dt

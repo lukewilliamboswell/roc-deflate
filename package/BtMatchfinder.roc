@@ -85,7 +85,7 @@ BtMatchfinder := [].{
 		var $cache_ptr = cache_ptr_0
 
 		in_next = in_base.plus_wrap(cur_pos)
-				next_hashseq = U32.from_le_bytes(input, in_next.plus_wrap(1)) ?? 0
+		next_hashseq = U32.from_le_bytes(input, in_next.plus_wrap(1)) ?? 0
 		hash3 = nh3
 		hash4 = nh4
 		out_hash3 = Matchfinder.lz_hash(next_hashseq.bitwise_and(0xFFFFFF), BtMatchfinder.hash3_order)
@@ -131,12 +131,9 @@ BtMatchfinder := [].{
 						Err(_) => return Err(CompressBug)
 					}
 					$cache_ptr = $cache_ptr.plus_wrap(1)
-				} else {
-				}
-			} else {
-			}
-		} else {
-		}
+				} else {}
+			} else {}
+		} else {}
 
 		node4 = List.get($tab4, hash4) ?? 0
 		$tab4 = match List.set($tab4, hash4, pos) {
@@ -167,8 +164,7 @@ BtMatchfinder := [].{
 				cache_off: $cache_off,
 				cache_ptr: $cache_ptr,
 			})
-		} else {
-		}
+		} else {}
 
 		var $node = node4
 		var $depth = max_search_depth
@@ -209,12 +205,9 @@ BtMatchfinder := [].{
 							Err(_) => return Err(CompressBug)
 						}
 						$walking = 0
-					} else {
-					}
-				} else {
-				}
-			} else {
-			}
+					} else {}
+				} else {}
+			} else {}
 
 			if $walking == 1 {
 				ns = $node.to_u64().bitwise_and(32767).times_wrap(2)
@@ -230,8 +223,7 @@ BtMatchfinder := [].{
 					$best_lt_len = $len
 					if $best_gt_len < $len {
 						$len = $best_gt_len
-					} else {
-					}
+					} else {}
 				} else {
 					$child = match List.set($child, $pending_gt, $node) {
 						Ok(next) => next
@@ -242,8 +234,7 @@ BtMatchfinder := [].{
 					$best_gt_len = $len
 					if $best_lt_len < $len {
 						$len = $best_lt_len
-					} else {
-					}
+					} else {}
 				}
 
 				$depth = $depth.minus_wrap(1)
@@ -257,10 +248,8 @@ BtMatchfinder := [].{
 						Err(_) => return Err(CompressBug)
 					}
 					$walking = 0
-				} else {
-				}
-			} else {
-			}
+				} else {}
+			} else {}
 		}
 
 		Ok({
@@ -288,7 +277,7 @@ BtMatchfinder := [].{
 		var $child = child_0
 
 		in_next = in_base.plus_wrap(cur_pos)
-				next_hashseq = U32.from_le_bytes(input, in_next.plus_wrap(1)) ?? 0
+		next_hashseq = U32.from_le_bytes(input, in_next.plus_wrap(1)) ?? 0
 		hash3 = nh3
 		hash4 = nh4
 		out_hash3 = Matchfinder.lz_hash(next_hashseq.bitwise_and(0xFFFFFF), BtMatchfinder.hash3_order)
@@ -331,8 +320,7 @@ BtMatchfinder := [].{
 				next_hash3: out_hash3,
 				next_hash4: out_hash4,
 			})
-		} else {
-		}
+		} else {}
 
 		var $node = node4
 		var $depth = max_search_depth
@@ -359,10 +347,8 @@ BtMatchfinder := [].{
 						Err(_) => return Err(CompressBug)
 					}
 					$walking = 0
-				} else {
-				}
-			} else {
-			}
+				} else {}
+			} else {}
 
 			if $walking == 1 {
 				ns = $node.to_u64().bitwise_and(32767).times_wrap(2)
@@ -376,8 +362,7 @@ BtMatchfinder := [].{
 					$best_lt_len = $len
 					if $best_gt_len < $len {
 						$len = $best_gt_len
-					} else {
-					}
+					} else {}
 				} else {
 					$child = match List.set($child, $pending_gt, $node) {
 						Ok(next) => next
@@ -388,8 +373,7 @@ BtMatchfinder := [].{
 					$best_gt_len = $len
 					if $best_lt_len < $len {
 						$len = $best_lt_len
-					} else {
-					}
+					} else {}
 				}
 
 				$depth = $depth.minus_wrap(1)
@@ -403,10 +387,8 @@ BtMatchfinder := [].{
 						Err(_) => return Err(CompressBug)
 					}
 					$walking = 0
-				} else {
-				}
-			} else {
-			}
+				} else {}
+			} else {}
 		}
 
 		Ok({

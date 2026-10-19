@@ -69,7 +69,7 @@ Deflate := [].{
 		var $out = List.with_capacity(in_end + 5 * (in_end // 65535 + 1))
 		if in_end == 0 {
 			$out = List.append($out, 1)
-			$out = match 0xFFFF0000.U64.append_le_bytes_to($out, 4) {
+			$out = match (0xFFFF0000.U64).append_le_bytes_to($out, 4) {
 				Ok(next) => next
 				Err(_) => return Err(CompressBug)
 			}
@@ -80,7 +80,11 @@ Deflate := [].{
 			while $storing == 1 {
 				remaining = in_end - $in_next
 				len = remaining.min(65535)
-				bfinal = if remaining <= 65535 { 1.U64 } else { 0 }
+				bfinal = if remaining <= 65535 {
+					1.U64
+				} else {
+					0
+				}
 				$out = List.append($out, bfinal.to_u8_wrap())
 				$out = match len.append_le_bytes_to($out, 2) {
 					Ok(next) => next
@@ -94,8 +98,7 @@ Deflate := [].{
 				$in_next = $in_next + len
 				if $in_next == in_end {
 					$storing = 0
-				} else {
-				}
+				} else {}
 			}
 			Ok($out)
 		}
