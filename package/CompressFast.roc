@@ -1,5 +1,4 @@
 import DeflateTables
-import HuffmanEncode
 import BlockOut
 import Matchfinder
 import HtMatchfinder
@@ -25,11 +24,12 @@ CompressFast := [].{
 	compress : List(U8), U64 -> Try(List(U8), [CompressBug])
 	compress = |input, nice_match_length| {
 		in_end = List.len(input)
-		static = CompressLazy.build_static_codes(0)?
-		var $s_litlen_lens = static.litlen_lens
-		var $s_litlen_codewords = static.litlen_codewords
-		var $s_offset_lens = static.offset_lens
-		var $s_offset_codewords = static.offset_codewords
+		# The symbol counts, the codes built from them and the writer's
+		# scratch are allocated once for the stream and reused by every block.
+		var $freqs_litlen = List.repeat(0.U32, DeflateTables.num_litlen_syms)
+		var $freqs_offset = List.repeat(0.U32, DeflateTables.num_offset_syms)
+		var $codes = BlockOut.init_codes({})
+		var $scratch = BlockOut.init_scratch({})
 
 		var $out = List.with_capacity(5 * ((in_end + CompressLazy.min_block_length - 1) // CompressLazy.min_block_length).max(1) + in_end)
 		var $bitbuf = 0.U64
@@ -55,8 +55,8 @@ CompressFast := [].{
 				in_end,
 				CompressFast.fast_soft_max_block_length,
 			)
-			var $freqs_litlen = List.repeat(0.U32, DeflateTables.num_litlen_syms)
-			var $freqs_offset = List.repeat(0.U32, DeflateTables.num_offset_syms)
+			$freqs_litlen = BlockOut.clear_counts($freqs_litlen)?
+			$freqs_offset = BlockOut.clear_counts($freqs_offset)?
 			$seqs = List.clear($seqs)
 			var $litrunlen = 0.U32
 
@@ -89,8 +89,7 @@ CompressFast := [].{
 					} else {
 						$nice_len = $nice_len.min($max_len)
 					}
-				} else {
-				}
+				} else {}
 
 				if $searched == 1 {
 					found = HtMatchfinder.longest_match($tab, $base, $nh, input, $in_next, $max_len, $nice_len)?
@@ -112,11 +111,14 @@ CompressFast := [].{
 							Ok(next) => next
 							Err(_) => return Err(CompressBug)
 						}
-						$seqs = List.append($seqs, {
-							litrunlen_and_length: $litrunlen.bitwise_or(found.length.to_u32_wrap().shl_wrap(BlockOut.seq_length_shift)),
-							offset: found.offset.to_u16_wrap(),
-							offset_slot: offset_slot.to_u16_wrap(),
-						})
+						$seqs = List.append(
+							$seqs,
+							{
+								litrunlen_and_length: $litrunlen.bitwise_or(found.length.to_u32_wrap().shl_wrap(BlockOut.seq_length_shift)),
+								offset: found.offset.to_u16_wrap(),
+								offset_slot: offset_slot.to_u16_wrap(),
+							},
+						)
 						$litrunlen = 0
 
 						skipped = HtMatchfinder.skip_bytes($tab, $base, $nh, input, $in_next.plus_wrap(1), in_end, found.length.minus_wrap(1))?
@@ -137,38 +139,31 @@ CompressFast := [].{
 
 					if $in_next >= in_max_block_end or List.len($seqs) >= CompressFast.fast_seq_store_length {
 						$in_block = 0
-					} else {
-					}
-				} else {
-				}
+					} else {}
+				} else {}
 			}
 
-			$seqs = List.append($seqs, {
-				litrunlen_and_length: $litrunlen,
-				offset: 0.U16,
-				offset_slot: 0.U16,
-			})
-			$freqs_litlen = match List.set($freqs_litlen, DeflateTables.end_of_block,
-				(List.get($freqs_litlen, DeflateTables.end_of_block) ?? 0) + 1) {
+			$seqs = List.append(
+				$seqs,
+				{
+					litrunlen_and_length: $litrunlen,
+					offset: 0.U16,
+					offset_slot: 0.U16,
+				},
+			)
+			$freqs_litlen = match List.set($freqs_litlen, DeflateTables.end_of_block, (List.get($freqs_litlen, DeflateTables.end_of_block) ?? 0) + 1) {
 				Ok(next) => next
 				Err(_) => return Err(CompressBug)
 			}
-			litlen_code = HuffmanEncode.make_code(
-				DeflateTables.num_litlen_syms,
-				BlockOut.max_litlen_codeword_len,
-				$freqs_litlen,
-				List.repeat(0.U8, DeflateTables.num_litlen_syms),
-				List.repeat(0.U32, DeflateTables.num_litlen_syms),
-			)?
-			offset_code = HuffmanEncode.make_code(
-				DeflateTables.num_offset_syms,
-				BlockOut.max_offset_codeword_len,
-				$freqs_offset,
-				List.repeat(0.U8, DeflateTables.num_offset_syms),
-				List.repeat(0.U32, DeflateTables.num_offset_syms),
-			)?
+			built = BlockOut.make_codes($freqs_litlen, $freqs_offset, $codes, $scratch)?
+			$codes = built.codes
+			$scratch = built.scratch
 
-			is_final = if $in_next == in_end { 1 } else { 0 }
+			is_final = if $in_next == in_end {
+				1
+			} else {
+				0
+			}
 			flushed = BlockOut.flush_block(
 				$out,
 				$bitbuf,
@@ -179,37 +174,26 @@ CompressFast := [].{
 				$seqs,
 				$freqs_litlen,
 				$freqs_offset,
-				litlen_code.lens,
-				litlen_code.codewords,
-				offset_code.lens,
-				offset_code.codewords,
-				$s_litlen_lens,
-				$s_litlen_codewords,
-				$s_offset_lens,
-				$s_offset_codewords,
+				$codes,
 				[],
 				0,
 				is_final,
+				$scratch,
 			)?
 			$out = flushed.out
 			$bitbuf = flushed.bitbuf
 			$bitcount = flushed.bitcount
 			$seqs = flushed.seqs
-			$s_litlen_lens = flushed.static_litlen_lens
-			$s_litlen_codewords = flushed.static_litlen_codewords
-			$s_offset_lens = flushed.static_offset_lens
-			$s_offset_codewords = flushed.static_offset_codewords
+			$scratch = flushed.scratch
 
 			if $in_next == in_end {
 				$blocking = 0
-			} else {
-			}
+			} else {}
 		}
 
 		if $bitcount > 0 {
 			$out = List.append($out, $bitbuf.to_u8_wrap())
-		} else {
-		}
+		} else {}
 		Ok($out)
 	}
 }
