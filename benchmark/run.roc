@@ -12,14 +12,14 @@
 ##
 ##     nix develop -c ./benchmark/run.roc
 app [main!] {
-	pf: platform "https://github.com/roc-lang/basic-cli/releases/download/0.23.0/GNN5tt2gKdX4dhawg4915C4YB193woHFdcCkz31fhGxv.tar.zst",
+	pf: platform "https://github.com/roc-lang/basic-cli/releases/download/0.26.0-rc2/Gj3zVDr3qrQa6aTh7Z1zgUfe9NeBE6R76T5ho3xrc8af.tar.zst",
 }
 
 import pf.Stdout
 import pf.Path
 import pf.Cmd
-import pf.IOErr exposing [IOErr]
-import pf.OsStr exposing [OsStr]
+import pf.IOErr
+import pf.OsStr
 
 corpus_dir = "benchmark/.corpus"
 
@@ -75,8 +75,8 @@ ensure_one! = |{ name, sha }| {
 		zip = "${corpus_dir}/${name}.zip"
 		Stdout.line!("  ${name}: downloading")?
 		run!("curl", ["-fsSL", "--retry", "3", "-o", zip, "${mirror}/${name}.zip"])?
-		out = Cmd.new(OsStr.from_str("sha256sum")).args([OsStr.from_str(zip)]).exec_output!() ? |_| Exit(1)
-		if out.stdout_utf8.contains(sha) {
+		out = Cmd.new(OsStr.from_str("sha256sum")).args([OsStr.from_str(zip)]).capture!() ? |_| Exit(1)
+		if out.contains(sha) {
 			run!("unzip", ["-oq", zip, "-d", corpus_dir])?
 			Stdout.line!("  ${name}: verified and extracted")
 		} else {
@@ -89,6 +89,6 @@ ensure_one! = |{ name, sha }| {
 # Run a command with inherited stdio, failing the script on a nonzero exit.
 run! : Str, List(Str) => Try({}, [Exit(I32)])
 run! = |program, arguments| {
-	Cmd.exec!(OsStr.from_str(program), arguments.map(OsStr.from_str)) ? |_| Exit(1)
+	Cmd.new(OsStr.from_str(program)).args(arguments.map(OsStr.from_str)).exec!() ? |_| Exit(1)
 	Ok({})
 }

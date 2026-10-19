@@ -25,14 +25,14 @@
 ##     ./benchmark/benchmark benchmark/.corpus > roc.tsv
 app [main!] {
 	deflate: "../package/main.roc",
-	pf: platform "https://github.com/roc-lang/basic-cli/releases/download/0.23.0/GNN5tt2gKdX4dhawg4915C4YB193woHFdcCkz31fhGxv.tar.zst",
+	pf: platform "https://github.com/roc-lang/basic-cli/releases/download/0.26.0-rc2/Gj3zVDr3qrQa6aTh7Z1zgUfe9NeBE6R76T5ho3xrc8af.tar.zst",
 }
 
 import pf.Stdout
 import pf.Path
-import pf.Utc
-import pf.IOErr exposing [IOErr]
-import pf.OsStr exposing [OsStr]
+import pf.Monotonic
+import pf.IOErr
+import pf.OsStr
 import deflate.Deflate
 
 # The 12 Silesia files, in the corpus's canonical order.
@@ -138,12 +138,12 @@ compress_loop! = |bytes, level, sink, best, elapsed, iters|
 	} else if iters >= max_iters or elapsed >= max_ns or (iters >= min_iters and elapsed >= min_ns) {
 		{ best_ns: best, iters: iters }
 	} else {
-		start = Utc.now!()
+		start = Monotonic.now!()
 		out = Deflate.compress(bytes, level)
 		# Read the length before stopping the clock so the work is forced.
 		produced = compressed_len(out)
-		finish = Utc.now!()
-		took = Utc.delta_as_nanos(finish, start)
+		finish = Monotonic.now!()
+		took = finish.since(start).to_nanos().to_u128()
 		next_best = if iters == 0 or took < best {
 			took
 		} else {
@@ -182,11 +182,11 @@ decompress_loop! = |compressed, sink, best, elapsed, iters|
 	} else if iters >= max_iters or elapsed >= max_ns or (iters >= min_iters and elapsed >= min_ns) {
 		{ best_ns: best, iters: iters }
 	} else {
-		start = Utc.now!()
+		start = Monotonic.now!()
 		out = Deflate.decompress(compressed)
 		produced = decompressed_len(out)
-		finish = Utc.now!()
-		took = Utc.delta_as_nanos(finish, start)
+		finish = Monotonic.now!()
+		took = finish.since(start).to_nanos().to_u128()
 		next_best = if iters == 0 or took < best {
 			took
 		} else {

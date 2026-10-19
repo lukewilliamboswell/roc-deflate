@@ -1,11 +1,11 @@
 app [main!] {
 	deflate: "../package/main.roc",
-	pf: platform "https://github.com/niclas-ahden/basic-cli/releases/download/0.22.1/DobkAk7zNyqAgqh2Riaj5c5DtWtKhd5iVYE5RFa6izcd.tar.zst",
+	pf: platform "https://github.com/roc-lang/basic-cli/releases/download/0.26.0-rc2/Gj3zVDr3qrQa6aTh7Z1zgUfe9NeBE6R76T5ho3xrc8af.tar.zst",
 }
 
 import pf.Stdout
 import pf.Path
-import pf.Utc
+import pf.Monotonic
 import deflate.Deflate
 
 # One decompression into a caller-supplied buffer sized for the whole
@@ -47,9 +47,9 @@ main! = |args| {
 		# extra 64 bytes cover the match copy's overrunning word stores,
 		# which demand that much spare beyond the final length.
 		buf0 = List.with_capacity(orig_len + 64)
-		t0 = Utc.now!()
+		t0 = Monotonic.now!()
 		$total = $total + run_once(stream, buf0)
-		dt = Utc.delta_as_nanos(t0, Utc.now!())
+		dt = Monotonic.now!().since(t0).to_nanos().to_u128()
 		if $r == 0 or dt < $best {
 			$best = dt
 		}

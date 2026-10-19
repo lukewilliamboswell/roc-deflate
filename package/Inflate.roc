@@ -542,8 +542,6 @@ Inflate := [].{
 				$count = List.get($len_counts, $len) ?? 0
 			}
 		}
-
-		Err(CorruptData)
 	}
 
 	BlockTables : { litlen : List(U32), litlen_mask : U64, offset : List(U32) }

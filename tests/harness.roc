@@ -14,15 +14,15 @@
 app [main!] {
 	crc32: "https://github.com/niclas-ahden/roc-crc32/releases/download/1.0.3/H7PGfAdWAHVHcw2RHGRkXzEZzzNjhmYm8vcDMmYvogw7.tar.zst",
 	deflate: "../package/main.roc",
-	pf: platform "https://github.com/roc-lang/basic-cli/releases/download/0.23.0/GNN5tt2gKdX4dhawg4915C4YB193woHFdcCkz31fhGxv.tar.zst",
+	pf: platform "https://github.com/roc-lang/basic-cli/releases/download/0.26.0-rc2/Gj3zVDr3qrQa6aTh7Z1zgUfe9NeBE6R76T5ho3xrc8af.tar.zst",
 }
 
 import pf.Stdout
 import pf.Cmd
 import pf.Path
 import pf.Env
-import pf.IOErr exposing [IOErr]
-import pf.OsStr exposing [OsStr]
+import pf.IOErr
+import pf.OsStr
 import deflate.Deflate
 import crc32.Crc32
 import TextGen
@@ -90,13 +90,13 @@ check_forward! = |corpus, tmp, name, level| {
 	gz_path = tmp.join("roc_deflate_harness_ours.gz")
 	Path.write_bytes!(gz_path, container) ? |_| Exit(1)
 	gz_os = OsStr.from_raw(Path.to_raw(gz_path))
-	res = match Cmd.new(OsStr.from_str("gzip")).args([OsStr.from_str("-dc"), gz_os]).exec_output_bytes!() {
+	output = Cmd.new(OsStr.from_str("gzip")).args([OsStr.from_str("-dc"), gz_os]).run!() ? |_| Exit(1)
+	res = match output.require_success() {
 		Ok(r) => r
-		Err(NonZeroExitCodeB({ exit_code, stderr_bytes, .. })) => {
-			Stdout.line!("  ${name}: gzip exit ${exit_code.to_str()}: ${Str.from_utf8_lossy(stderr_bytes)}")?
+		Err(BadExitStatus(failed)) => {
+			Stdout.line!("  ${name}: gzip failed: ${Str.from_utf8_lossy(failed.stderr_bytes)}")?
 			Err(Exit(1))?
 		}
-		Err(_) => Err(Exit(1))?
 	}
 	Path.delete!(gz_path) ? |_| Exit(1)
 	if res.stdout_bytes == corpus {
@@ -111,7 +111,8 @@ check_forward! = |corpus, tmp, name, level| {
 # decompressor reproduces the corpus from the raw DEFLATE stream.
 check_reverse! : List(U8), OsStr, Str => Try({}, [Exit(I32), StdoutErr(IOErr)])
 check_reverse! = |corpus, corpus_os, level| {
-	res = Cmd.new(OsStr.from_str("gzip")).args([OsStr.from_str("-n"), OsStr.from_str(level), OsStr.from_str("-c"), corpus_os]).exec_output_bytes!() ? |_| Exit(1)
+	output = Cmd.new(OsStr.from_str("gzip")).args([OsStr.from_str("-n"), OsStr.from_str(level), OsStr.from_str("-c"), corpus_os]).run!() ? |_| Exit(1)
+	res = output.require_success() ? |_| Exit(1)
 	# gzip member: 10-byte header, raw DEFLATE, then CRC32 + length (8 bytes).
 	raw = res.stdout_bytes.drop_first(10).drop_last(8)
 	decoded = Deflate.decompress(raw) ? |_| Exit(1)
