@@ -647,7 +647,10 @@ CompressOptimal := [].{
 		# copied whenever it crosses a call boundary.
 		var $tab3 = Matchfinder.init_nodes(BtMatchfinder.hash3_size)
 		var $tab4 = Matchfinder.init_nodes(BtMatchfinder.hash4_size)
-		var $child = Matchfinder.init_nodes(BtMatchfinder.child_size)
+		# A position's two child slots are indexed by its offset in the window,
+		# and an input shorter than the window never reaches the slots past its
+		# own length, so a short input allocates only those it can touch.
+		var $child = Matchfinder.init_nodes(BtMatchfinder.child_size.min(2 * in_end))
 		var $nh3 = 0.U64
 		var $nh4 = 0.U64
 
