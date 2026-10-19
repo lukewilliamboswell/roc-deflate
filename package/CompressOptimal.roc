@@ -407,9 +407,9 @@ CompressOptimal := [].{
 	##
 	## The node tables are appended in that same order, so node `n` sits at
 	## index `top - n` (see `node_top`): a position's node comes after every
-	## later position's, which is exactly what its cost scan reads. The caller
-	## passes the tables in empty; they keep their capacity from pass to pass
-	## and block to block and are never initialized.
+	## later position's, which is exactly what its cost scan reads. The tables
+	## are cleared on entry; they keep their capacity from pass to pass and
+	## block to block and are never initialized.
 	find_min_cost_path : U64, List(U32), List(U32), U64, List(U32), List(U32), List(U32), List(U32), List(U32) -> Try(PathResult, [CompressBug])
 	find_min_cost_path = |block_length, cache_len, cache_off, cache_end, node_cost_0, node_item_0, cost_literal, cost_length, cost_offset_slot| {
 		top = CompressOptimal.node_top(block_length)
@@ -418,13 +418,8 @@ CompressOptimal := [].{
 		if List.len(cost_length) < DeflateTables.max_match_len + 1 {
 			return Err(CompressBug)
 		} else {}
-		# The caller clears the node tables. Clearing them here would lose their
-		# capacity.
-		# TODO(roc-lang/roc#11934): a parameter used only by `List.clear` is
-		# inferred borrowed, and clearing a borrowed list allocates a new one,
-		# so every pass regrew both tables from empty.
-		var $node_cost = node_cost_0
-		var $node_item = node_item_0
+		var $node_cost = List.clear(node_cost_0)
+		var $node_item = List.clear(node_item_0)
 
 		# Make the block really end where it should, even though matches found
 		# near the end may reach past it: every node past the end costs too
@@ -983,8 +978,8 @@ CompressOptimal := [].{
 					$cache_len,
 					$cache_off,
 					$cache_end,
-					List.clear($node_cost),
-					List.clear($node_item),
+					$node_cost,
+					$node_item,
 					sc.literal,
 					sc.length,
 					sc.offset_slot,
@@ -1045,8 +1040,8 @@ CompressOptimal := [].{
 					$cache_len,
 					$cache_off,
 					$cache_end,
-					List.clear($node_cost),
-					List.clear($node_item),
+					$node_cost,
+					$node_item,
 					$cost_literal,
 					$cost_length,
 					$cost_offset_slot,
@@ -1145,8 +1140,8 @@ CompressOptimal := [].{
 						$cache_len,
 						$cache_off,
 						$cache_end,
-						List.clear($node_cost),
-						List.clear($node_item),
+						$node_cost,
+						$node_item,
 						$cost_literal,
 						$cost_length,
 						$cost_offset_slot,
@@ -1178,8 +1173,8 @@ CompressOptimal := [].{
 					$cache_len,
 					$cache_off,
 					$cache_end,
-					List.clear($node_cost),
-					List.clear($node_item),
+					$node_cost,
+					$node_item,
 					$cost_literal,
 					$cost_length,
 					$cost_offset_slot,
