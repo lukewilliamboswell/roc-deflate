@@ -254,13 +254,32 @@ CompressLazy := [].{
 	bsr32 : U64 -> I64
 	bsr32 = |x| 31 - x.to_u32_wrap().count_leading_zero_bits().to_i64()
 
+	## The hash-chain matchfinder's tables and the sequence store, which a
+	## `Deflate.Compressor` keeps between streams. Empty lists are fresh
+	## tables: every stream starts from cleared tables either way.
+	ChainTables : { mf3 : List(U16), mf4 : List(U16), mfnext : List(U16), seqs : List(BlockOut.Sequence) }
+
+	## No tables yet, for a single stream.
+	no_chain_tables : ChainTables
+	no_chain_tables = { mf3: [], mf4: [], mfnext: [], seqs: [] }
+
 	## Compress with the greedy parser, which always takes the longest match
 	## at the current position.
 	##
 	## Unlike the lazy parser this never looks ahead, so it has no reason to
 	## revise the minimum match length mid-block either.
 	compress_greedy : List(U8), Params, List(U8) -> List(U8)
-	compress_greedy = |input, params, out| {
+	compress_greedy = |input, params, out|
+		CompressLazy.compress_greedy_with(input, params, out, CompressLazy.no_chain_tables).out
+
+	## `compress_greedy` in the tables a previous stream left, handing them
+	## back with the stream.
+	compress_greedy_with : List(U8), Params, List(U8), ChainTables -> { out : List(U8), mf3 : List(U16), mf4 : List(U16), mfnext : List(U16), seqs : List(BlockOut.Sequence) }
+	compress_greedy_with = |input, params, out, tables| {
+		mf3_0 = tables.mf3
+		mf4_0 = tables.mf4
+		mfnext_0 = tables.mfnext
+		seqs_0 = tables.seqs
 		in_end = List.len(input)
 		# Stating the input's minimum length lets every four-byte read below
 		# drop its own test for an input shorter than four bytes.
@@ -287,15 +306,17 @@ CompressLazy := [].{
 		var $nice_len = params.nice_match_length.min(DeflateTables.max_match_len)
 		# Keep the hash heads and chain links in separate lists so each search
 		# indexes its table directly, with its size established before the loop.
-		var $mf3 = List.repeat(0.U16, HcMatchfinder.hash3_size)
-		var $mf4 = List.repeat(0.U16, HcMatchfinder.hash4_size)
-		var $mfnext = List.repeat(0.U16, Matchfinder.window_size)
+		var $mf3 = Matchfinder.reset_nodes(mf3_0, HcMatchfinder.hash3_size)
+		var $mf4 = Matchfinder.reset_nodes(mf4_0, HcMatchfinder.hash4_size)
+		var $mfnext = Matchfinder.reset_nodes(mfnext_0, Matchfinder.window_size)
 		var $base = 0.U64
 		var $nh3 = 0.U64
 		var $nh4 = 0.U64
 		# One allocation for the whole stream: a block appends its sequences and
 		# the run terminator, and clearing the list afterwards keeps the capacity.
-		var $seqs = List.with_capacity(CompressLazy.seq_store_length + 1)
+		# Every match is at least three bytes, so a short input needs only a
+		# short store.
+		var $seqs = List.reserve(List.clear(seqs_0), (in_end // DeflateTables.min_match_len).min(CompressLazy.seq_store_length) + 1)
 
 		var $blocking = 1.U64
 		while $blocking == 1 {
@@ -794,7 +815,7 @@ CompressLazy := [].{
 			$out = List.append($out, $bitbuf.to_u8_wrap())
 		} else {
 		}
-		$out
+		{ out: $out, mf3: $mf3, mf4: $mf4, mfnext: $mfnext, seqs: $seqs }
 	}
 
 	## Compress with the greedy or lazy parser.
@@ -802,7 +823,17 @@ CompressLazy := [].{
 	## `params.lazy` selects how far ahead the parser looks before committing to
 	## a match: zero is greedy, one is lazy, two is lazy2.
 	compress : List(U8), Params, List(U8) -> List(U8)
-	compress = |input, params, out| {
+	compress = |input, params, out|
+		CompressLazy.compress_with(input, params, out, CompressLazy.no_chain_tables).out
+
+	## `compress` in the tables a previous stream left, handing them back with
+	## the stream.
+	compress_with : List(U8), Params, List(U8), ChainTables -> { out : List(U8), mf3 : List(U16), mf4 : List(U16), mfnext : List(U16), seqs : List(BlockOut.Sequence) }
+	compress_with = |input, params, out, tables| {
+		mf3_0 = tables.mf3
+		mf4_0 = tables.mf4
+		mfnext_0 = tables.mfnext
+		seqs_0 = tables.seqs
 		in_end = List.len(input)
 		# Stating the input's minimum length lets every four-byte read below
 		# drop its own test for an input shorter than four bytes.
@@ -826,15 +857,17 @@ CompressLazy := [].{
 		var $nice_len = params.nice_match_length.min(DeflateTables.max_match_len)
 		# Keep the hash heads and chain links in separate lists so each search
 		# indexes its table directly, with its size established before the loop.
-		var $mf3 = List.repeat(0.U16, HcMatchfinder.hash3_size)
-		var $mf4 = List.repeat(0.U16, HcMatchfinder.hash4_size)
-		var $mfnext = List.repeat(0.U16, Matchfinder.window_size)
+		var $mf3 = Matchfinder.reset_nodes(mf3_0, HcMatchfinder.hash3_size)
+		var $mf4 = Matchfinder.reset_nodes(mf4_0, HcMatchfinder.hash4_size)
+		var $mfnext = Matchfinder.reset_nodes(mfnext_0, Matchfinder.window_size)
 		var $base = 0.U64
 		var $nh3 = 0.U64
 		var $nh4 = 0.U64
 		# One allocation for the whole stream: a block appends its sequences and
 		# the run terminator, and clearing the list afterwards keeps the capacity.
-		var $seqs = List.with_capacity(CompressLazy.seq_store_length + 1)
+		# Every match is at least three bytes, so a short input needs only a
+		# short store.
+		var $seqs = List.reserve(List.clear(seqs_0), (in_end // DeflateTables.min_match_len).min(CompressLazy.seq_store_length) + 1)
 
 		var $blocking = 1.U64
 		while $blocking == 1 {
@@ -1781,7 +1814,7 @@ CompressLazy := [].{
 			$out = List.append($out, $bitbuf.to_u8_wrap())
 		} else {
 		}
-		$out
+		{ out: $out, mf3: $mf3, mf4: $mf4, mfnext: $mfnext, seqs: $seqs }
 	}
 }
 
