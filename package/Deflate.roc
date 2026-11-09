@@ -82,26 +82,31 @@ Deflate := [].{
 	## buffer that way also reuses its memory, which a fresh list for every
 	## stream has to fetch from the system again.
 	compress_into : List(U8), Level, List(U8) -> List(U8)
-	compress_into = |input, chosen, out| {
-		level = chosen.to_u64()
-		# Level 0 never compresses. Above it, inputs this short are not worth
-		# trying to compress, and the higher the level, the shorter an input it
-		# still tries on (libdeflate's `max_passthrough_size`).
-		max_passthrough = if level == 0 { 18446744073709551615 } else { 55 - 4 * level }
-		if List.len(input) <= max_passthrough {
-			store_uncompressed(input, out)
-		} else if level == 1 {
-			CompressFast.compress(input, 32, out)
-		} else if level >= 10 {
-			CompressOptimal.compress(input, optimal_params_for(level), out)
-		} else {
-			params = params_for(level)
-			if params.lazy == 0 {
-				CompressLazy.compress_greedy(input, params, out)
-			} else {
-				CompressLazy.compress(input, params, out)
-			}
-		}
+	compress_into = |input, chosen, out|
+		compress_tables(input, chosen, out, fresh_tables(chosen)).out
+
+	## A compression level together with the matchfinder tables and sequence
+	## store its compressor works in, kept between streams.
+	##
+	## `compress` allocates those for every stream: about 128 KiB at level 1,
+	## 256 KiB at levels 2 to 9 and 512 KiB at levels 10 to 12, plus storage
+	## sized to the input. Compressing many streams, such as the entries of a
+	## ZIP archive, through one `Compressor` allocates them once and clears
+	## them for each stream, as libdeflate's `libdeflate_alloc_compressor`
+	## does. The output is the same bytes `compress` gives.
+	Compressor :: { level : Level, tables : Tables }
+
+	## A compressor at the given level, holding no tables until its first
+	## stream.
+	compressor : Level -> Compressor
+	compressor = |level| { level, tables: fresh_tables(level) }
+
+	## Compress bytes into a raw DEFLATE stream at the compressor's level,
+	## using its tables, and hand the compressor back for the next stream.
+	compress_with : Compressor, List(U8) -> { compressor : Compressor, output : List(U8) }
+	compress_with = |comp, input| {
+		done = compress_tables(input, comp.level, [], comp.tables)
+		{ compressor: { level: comp.level, tables: done.tables }, output: done.out }
 	}
 
 	## The largest a compressed stream can be, matching libdeflate's bound.
@@ -202,6 +207,66 @@ reserve_for = |input, bounds|
 		Declared(n) => n
 		Unknown => List.len(input).min(U64.highest // 3) * 3
 	}
+
+# The tables a level's compressor works in.
+Tables : [
+	NoTables,
+	Fast(CompressFast.FastTables),
+	Chain(CompressLazy.ChainTables),
+	Tree(CompressOptimal.TreeTables),
+]
+
+# Empty tables of the kind a level uses, which its compressor allocates on
+# first use.
+fresh_tables : Deflate.Level -> Tables
+fresh_tables = |chosen| {
+	level = chosen.to_u64()
+	if level == 0 {
+		NoTables
+	} else if level == 1 {
+		Fast(CompressFast.no_fast_tables)
+	} else if level >= 10 {
+		Tree(CompressOptimal.no_tree_tables)
+	} else {
+		Chain(CompressLazy.no_chain_tables)
+	}
+}
+
+# Compress at a level in the given tables, handing them back. Every
+# compression goes through here, so `compress` and `compress_with` give the
+# same bytes.
+compress_tables : List(U8), Deflate.Level, List(U8), Tables -> { out : List(U8), tables : Tables }
+compress_tables = |input, chosen, out, tables| {
+	level = chosen.to_u64()
+	# Level 0 never compresses. Above it, inputs this short are not worth
+	# trying to compress, and the higher the level, the shorter an input it
+	# still tries on (libdeflate's `max_passthrough_size`).
+	max_passthrough = if level == 0 { 18446744073709551615 } else { 55 - 4 * level }
+	if List.len(input) <= max_passthrough {
+		{ out: store_uncompressed(input, out), tables }
+	} else {
+		match tables {
+			Fast(fast) => {
+				done = CompressFast.compress_with(input, 32, out, fast)
+				{ out: done.out, tables: Fast({ tab: done.tab, seqs: done.seqs }) }
+			}
+			Tree(tree) => {
+				done = CompressOptimal.compress_with(input, optimal_params_for(level), out, tree)
+				{ out: done.out, tables: Tree({ mf: done.mf, cache: done.cache, nodes: done.nodes }) }
+			}
+			Chain(chain) => {
+				params = params_for(level)
+				done = if params.lazy == 0 {
+					CompressLazy.compress_greedy_with(input, params, out, chain)
+				} else {
+					CompressLazy.compress_with(input, params, out, chain)
+				}
+				{ out: done.out, tables: Chain({ mf3: done.mf3, mf4: done.mf4, mfnext: done.mfnext, seqs: done.seqs }) }
+			}
+			NoTables => crash "Deflate.compress_tables: level ${level.to_str()} compresses without tables"
+		}
+	}
+}
 
 # Emit the input as stored blocks, which is what the format requires even
 # for empty input.
@@ -384,6 +449,67 @@ expect {
 	$ok
 }
 
+# A stream is bounded by the bytes it appends, at every level: exactly its
+# length decodes and one byte fewer stops with `OutputLimitExceeded`, over
+# inputs that end in a match and inputs that end in literals. Each stream is
+# also padded with trailing bytes, which are ignored, so that the fast loop,
+# which stops 24 bytes short of the input end, decodes the final block and
+# its room check is what stops it.
+expect {
+	text = "the cat, the cow, the crow, then the cricket saw the cow again and again".to_utf8()
+	inputs = [
+		text,
+		List.repeat(0x41, 5000),
+		text.concat(List.repeat(0x20, 700)).concat(text),
+		text.concat("zyxwvutsrqponmlkjihgfedcba".to_utf8()),
+	]
+	var $ok = True
+	for level in Deflate.Level.all {
+		for original in inputs {
+			compressed = Deflate.compress(original, level)
+			for stream in [compressed, compressed.concat(List.repeat(0, 32))] {
+				n = List.len(original)
+				exact = Deflate.decompress(stream, { max_output: n })
+				short = Deflate.decompress(stream, { max_output: n - 1 })
+				declared = Deflate.decompress(stream, { max_output: n, expected_size: Declared(n) })
+				short_declared = Deflate.decompress(stream, { max_output: n - 1, expected_size: Declared(n) })
+				if exact != Ok(original) or short != Err(OutputLimitExceeded) or declared != Ok(original) or short_declared != Err(OutputLimitExceeded) {
+					$ok = False
+				} else {}
+			}
+		}
+	}
+	$ok
+}
+
+# A zero bound accepts only an empty stream.
+expect Deflate.decompress([0x03, 0x00], { max_output: 0 }) == Ok([])
+
+expect Deflate.decompress([0x01, 0x05, 0x00, 0xFA, 0xFF, 0x48, 0x65, 0x6C, 0x6C, 0x6F], { max_output: 0 }) == Err(OutputLimitExceeded)
+
+# A declared size far above the bound reserves no more than the bound and
+# the match-copy scratch.
+expect {
+	match Deflate.decompress([0x03, 0x00], { max_output: 16, expected_size: Declared(1_000_000_000_000) }) {
+		Ok(out) => List.capacity(out) <= 16 + Inflate.copy_scratch
+		Err(_) => False
+	}
+}
+
+# A truthful declared size is the whole allocation: the output's capacity is
+# that size and the match-copy scratch, at every level.
+expect {
+	text = "the cat, the cow, the crow, then the cricket saw the cow again and again".to_utf8()
+	original = List.join(List.repeat(text, 300))
+	n = List.len(original)
+	Deflate.Level.all.all(|level| {
+		match Deflate.decompress(Deflate.compress(original, level), { max_output: n, expected_size: Declared(n) }) {
+			Ok(out) => out == original and List.capacity(out) == n + Inflate.copy_scratch
+			Err(_) => False
+		}
+	})
+}
+
 # A declared size is a hint, not a check: a stream longer or shorter than it
 # still decodes, and a size far above the bound reserves no more than the
 # bound.
@@ -476,6 +602,26 @@ expect {
 		if appended != List.concat([7, 8], alone) or reused != alone {
 			$ok = False
 		} else {}
+	}
+	$ok
+}
+
+# One compressor gives the same bytes as `compress`, stream after stream, at
+# every level: shorter, longer and stored inputs in turn, so every table is
+# reused after a different-sized stream.
+expect {
+	text = "the cat, the cow, the crow, then the cricket saw the cow again and again".to_utf8()
+	inputs = [List.join(List.repeat(text, 40)), text, List.sublist(text, { start: 0, len: 10 }), List.join(List.repeat(text, 400)), List.repeat(0, 3000)]
+	var $ok = True
+	for level in Deflate.Level.all {
+		var $comp = Deflate.compressor(level)
+		for input in inputs {
+			done = Deflate.compress_with($comp, input)
+			if done.output != Deflate.compress(input, level) {
+				$ok = False
+			} else {}
+			$comp = done.compressor
+		}
 	}
 	$ok
 }

@@ -35,6 +35,17 @@ Matchfinder := [].{
 	init_nodes = |num_entries|
 		List.repeat(0.U16, num_entries)
 
+	## A table of `num_entries` cleared nodes, reusing `table` when it is a
+	## previous stream's table of that size, as libdeflate clears its
+	## compressor's tables at the start of every stream.
+	reset_nodes : List(U16), U64 -> List(U16)
+	reset_nodes = |table, num_entries|
+		if List.len(table) == num_entries {
+			List.map(table, |_| 0)
+		} else {
+			List.repeat(0.U16, num_entries)
+		}
+
 	## Slide a node table back by one window: a saturating subtract, since a
 	## node already in the first window stays permanently out of it.
 	rebase_nodes : List(U16) -> List(U16)

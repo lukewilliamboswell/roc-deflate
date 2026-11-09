@@ -63,6 +63,38 @@ CompressOptimal := [].{
 		+ DeflateTables.max_match_len
 		- 1
 
+	## The most cache entries one position of the parse can write: a full set
+	## of matches plus its header, then the headers of a maximum-length skip.
+	cache_entries_per_position : U64
+	cache_entries_per_position = CompressOptimal.max_matches_per_pos + DeflateTables.max_match_len
+
+	## The cache's starting length for an input of `in_end` bytes, never past
+	## the fixed size. A position writes a header and one entry per match,
+	## and text fills two to four entries a byte, so four a byte, plus one
+	## position's worst case, rarely needs to grow.
+	initial_cache_size : U64 -> U64
+	initial_cache_size = |in_end|
+		(4 * in_end.min(CompressOptimal.match_cache_size) + CompressOptimal.cache_entries_per_position).min(CompressOptimal.match_cache_size)
+
+	## Lengthen a match cache to at least `needed` entries, at least doubling
+	## it so growth stays linear overall, but never past its fixed size.
+	grow_cache : List(U32), U64 -> List(U32)
+	grow_cache = |cache, needed|
+		CompressOptimal.extend_cache(cache, needed.max(2 * List.len(cache)).min(CompressOptimal.match_cache_size))
+
+	## Lengthen a match cache to exactly `target` entries.
+	extend_cache : List(U32), U64 -> List(U32)
+	extend_cache = |cache, target| {
+		extra = target - List.len(cache).min(target)
+		var $grown = List.reserve(cache, extra)
+		var $i = 0.U64
+		while $i < extra {
+			$grown = List.append($grown, 0)
+			$i = $i + 1
+		}
+		$grown
+	}
+
 	## The most nodes a path's tables hold: one per position of the longest
 	## block, then the end of the block and every node past it that a match
 	## found near the end could reach (see `node_top`). The longest a block can
@@ -692,9 +724,27 @@ CompressOptimal := [].{
 		$cost
 	}
 
+	## The binary-tree matchfinder's tables, the match cache and the node
+	## list, which a `Deflate.Compressor` keeps between streams. Empty lists
+	## are fresh tables: every stream starts from cleared tables either way.
+	TreeTables : { mf : List(U16), cache : List(U32), nodes : List(U64) }
+
+	## No tables yet, for a single stream.
+	no_tree_tables : TreeTables
+	no_tree_tables = { mf: [], cache: [], nodes: [] }
+
 	## Compress with the near-optimal parser.
 	compress : List(U8), Params, List(U8) -> List(U8)
-	compress = |input, params, out| {
+	compress = |input, params, out|
+		CompressOptimal.compress_with(input, params, out, CompressOptimal.no_tree_tables).out
+
+	## `compress` in the tables a previous stream left, handing them back with
+	## the stream.
+	compress_with : List(U8), Params, List(U8), TreeTables -> { out : List(U8), mf : List(U16), cache : List(U32), nodes : List(U64) }
+	compress_with = |input, params, out, tables| {
+		mf_0 = tables.mf
+		cache_0 = tables.cache
+		nodes_0 = tables.nodes
 		in_end = List.len(input)
 		static = CompressLazy.build_static_codes(0)
 		var $s_litlen_lens = static.litlen_lens
@@ -711,13 +761,20 @@ CompressOptimal := [].{
 		# The matchfinder's tables (one list) and the two big per-block arrays
 		# are held as separate values rather than in one record: a record of lists is
 		# copied whenever it crosses a call boundary.
-		var $mf = Matchfinder.init_nodes(BtMatchfinder.table_size)
+		var $mf = Matchfinder.reset_nodes(mf_0, BtMatchfinder.table_size)
 		var $nh3 = 0.U64
 		var $nh4 = 0.U64
 
-		var $cache = List.repeat(0.U32, CompressOptimal.match_cache_size)
+		# The match cache and the node list start sized to the input, not to
+		# the longest block, so a short input does not allocate megabytes. The
+		# cache grows as the parse needs it, and the block-ending rule still
+		# uses the fixed cache length, so the output is the same. A reused
+		# cache keeps its length, or grows to this stream's starting length:
+		# every entry is written before it is read, so it needs no clearing.
+		initial_cache = CompressOptimal.initial_cache_size(in_end)
+		var $cache = if List.len(cache_0) >= initial_cache { cache_0 } else { CompressOptimal.extend_cache(cache_0, initial_cache) }
 		var $cache_ptr = 0.U64
-		var $nodes = List.with_capacity(CompressOptimal.optimum_nodes_size)
+		var $nodes = List.reserve(List.clear(nodes_0), (in_end + DeflateTables.max_match_len + 1).min(CompressOptimal.optimum_nodes_size))
 
 		var $cost_literal = List.repeat(0.U32, DeflateTables.num_literals)
 		var $cost_length = List.repeat(0.U32, DeflateTables.max_match_len + 1)
@@ -789,6 +846,11 @@ CompressOptimal := [].{
 				} else {
 				}
 
+				# Room for this position's worst case.
+				if $cache_ptr + CompressOptimal.cache_entries_per_position > List.len($cache) {
+					$cache = CompressOptimal.grow_cache($cache, $cache_ptr + CompressOptimal.cache_entries_per_position)
+				} else {
+				}
 				matches_at = $cache_ptr
 				var $best_len = 0.U64
 				if remaining < DeflateTables.max_match_len {
@@ -1278,7 +1340,7 @@ CompressOptimal := [].{
 			$out = List.append($out, $bitbuf.to_u8_wrap())
 		} else {
 		}
-		$out
+		{ out: $out, mf: $mf, cache: $cache, nodes: $nodes }
 	}
 
 	MergedFreqs : { total : List(U32), fresh : List(U32) }

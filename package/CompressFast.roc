@@ -22,8 +22,25 @@ CompressFast := [].{
 	fast_seq_store_length : U64
 	fast_seq_store_length = 8192
 
+	## The hash-table matchfinder's table and the sequence store, which a
+	## `Deflate.Compressor` keeps between streams. Empty lists are fresh
+	## tables: every stream starts from a cleared table either way.
+	FastTables : { tab : List(U16), seqs : List(BlockOut.Sequence) }
+
+	## No tables yet, for a single stream.
+	no_fast_tables : FastTables
+	no_fast_tables = { tab: [], seqs: [] }
+
 	compress : List(U8), U64, List(U8) -> List(U8)
-	compress = |input, nice_match_length, out| {
+	compress = |input, nice_match_length, out|
+		CompressFast.compress_with(input, nice_match_length, out, CompressFast.no_fast_tables).out
+
+	## `compress` in the table and store a previous stream left, handing them
+	## back with the stream.
+	compress_with : List(U8), U64, List(U8), FastTables -> { out : List(U8), tab : List(U16), seqs : List(BlockOut.Sequence) }
+	compress_with = |input, nice_match_length, out, tables| {
+		tab_0 = tables.tab
+		seqs_0 = tables.seqs
 		in_end = List.len(input)
 		# Positions before this one have a full-length match in reach, so the
 		# search there needs no shortening.
@@ -43,12 +60,14 @@ CompressFast := [].{
 		var $max_len = DeflateTables.max_match_len
 		var $nice_len = nice_match_length.min(DeflateTables.max_match_len)
 		# Held apart rather than in one record: see HtMatchfinder.State.
-		var $tab = Matchfinder.init_nodes(HtMatchfinder.table_size)
+		var $tab = Matchfinder.reset_nodes(tab_0, HtMatchfinder.table_size)
 		var $base = 0.U64
 		var $nh = 0.U64
 		# One allocation for the whole stream: a block appends its sequences and
 		# the run terminator, and clearing the list afterwards keeps the capacity.
-		var $seqs = List.with_capacity(CompressFast.fast_seq_store_length + 1)
+		# Every match is at least three bytes, so a short input needs only a
+		# short store.
+		var $seqs = List.reserve(List.clear(seqs_0), (in_end // DeflateTables.min_match_len).min(CompressFast.fast_seq_store_length) + 1)
 
 		var $blocking = 1.U64
 		while $blocking == 1 {
@@ -392,6 +411,6 @@ CompressFast := [].{
 			$out = List.append($out, $bitbuf.to_u8_wrap())
 		} else {
 		}
-		$out
+		{ out: $out, tab: $tab, seqs: $seqs }
 	}
 }
