@@ -14,7 +14,7 @@ main! = |seed| {
 	start = now!()
 	compressed = Deflate.compress_into(input, level, buf)
 	elapsed = now!() - start
-	decoded = Deflate.decompress(compressed) ?? []
+	decoded = Deflate.decompress(compressed, {}) ?? []
 	if decoded != input {
 		crash "round-trip failed"
 	}

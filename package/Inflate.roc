@@ -13,30 +13,74 @@ import DeflateTables
 ## at a time.
 Inflate := [].{
 
-	## Decompress a raw DEFLATE stream.
+	## The working state one stream's decode needs, kept between streams so a
+	## caller decoding many can allocate it once, as libdeflate's
+	## `libdeflate_alloc_decompressor` does.
+	##
+	## The litlen and offset decode tables are rebuilt for every dynamic block
+	## but into the same allocations, and so are the precode table and the
+	## code-length scratch. Rebuilding writes every entry a decode can read,
+	## so leftover entries never need clearing. `static_loaded` says the
+	## litlen and offset tables still hold the static Huffman codes, as they do
+	## after a static block until a dynamic one overwrites them, so a run of
+	## static blocks builds them once, even across streams. libdeflate keeps
+	## the same flag.
+	Scratch : {
+		litlen : List(U32),
+		offset : List(U32),
+		precode : List(U32),
+		lens : List(U8),
+		static_loaded : Bool,
+		static_litlen_mask : U64,
+	}
+
+	## Fresh working state, holding no tables yet.
+	new_scratch : () -> Scratch
+	new_scratch = || {
+		litlen: List.repeat(0.U32, Inflate.litlen_enough),
+		offset: List.repeat(0.U32, Inflate.offset_enough),
+		precode: List.repeat(0.U32, Inflate.precode_enough),
+		lens: List.repeat(0.U8, Inflate.lens_enough),
+		static_loaded: False,
+		static_litlen_mask: 0,
+	}
+
+	## Decompress a raw DEFLATE stream, appending the output to `out`, and
+	## hand back the working state for the next stream.
 	##
 	## Mirrors `libdeflate_deflate_decompress`'s generic loop. Input past the
 	## final block is ignored, matching a stream embedded in a larger buffer.
-	decompress : List(U8) -> Try(List(U8), [CorruptData, UnexpectedEnd])
-	decompress = |input|
-		Inflate.decompress_into(input, List.with_capacity(List.len(input) * 3))
-
-	## Decompress a raw DEFLATE stream, appending the output to `out`.
 	##
-	## The caller controls the output allocation: passing a list with enough
-	## spare capacity for the whole result (libdeflate's own calling
-	## convention, where the caller always supplies the output buffer) means
-	## the decompressor never reallocates mid-stream, and a returned list can
-	## be emptied with its capacity kept and passed back in to decompress the
-	## next stream with no fresh allocation.
+	## The stream may append at most `max_output` bytes to `out`. Decoding
+	## stops with `OutputLimitExceeded` before any append that would pass it,
+	## so the output never holds more than `max_output` bytes past what `out`
+	## held. Before decoding, `reserve` more bytes of capacity are reserved
+	## past `out`'s length, never more than `max_output`.
 	##
 	## The bytes already in `out` are not part of the stream, so a match that
 	## reaches back past the stream's own output is corrupt, just as it is
 	## when `out` starts empty.
-	decompress_into : List(U8), List(U8) -> Try(List(U8), [CorruptData, UnexpectedEnd])
-	decompress_into = |input, out| {
+	##
+	## A failed decode may have overwritten the tables partway, so it hands
+	## back fresh state instead.
+	inflate : Scratch, List(U8), List(U8), U64, U64 -> { scratch : Scratch, output : Try(List(U8), [CorruptData, UnexpectedEnd, OutputLimitExceeded]) }
+	inflate = |scratch, input, out, max_output, reserve|
+		match Inflate.inflate_stream(scratch, input, List.reserve(out, reserve.min(max_output)), max_output) {
+			Ok(done) => { scratch: done.scratch, output: Ok(done.out) }
+			Err(err) => { scratch: Inflate.new_scratch(), output: Err(err) }
+		}
+
+	inflate_stream : Scratch, List(U8), List(U8), U64 -> Try({ scratch : Scratch, out : List(U8) }, [CorruptData, UnexpectedEnd, OutputLimitExceeded])
+	inflate_stream = |scratch, input, out, max_output| {
 		in_len = List.len(input)
 		out_start = List.len(out)
+		# The most bytes the output may hold, which no list length reaches
+		# when the bound is larger than anything addressable.
+		out_limit = if max_output > U64.highest - out_start {
+			U64.highest
+		} else {
+			out_start + max_output
+		}
 
 		var $out = out
 		var $in_next = 0.U64
@@ -45,17 +89,14 @@ Inflate := [].{
 		var $overread = 0.U64
 		var $more_blocks = True
 
-		# The two big decode tables are rebuilt for every dynamic block but into
-		# the same allocations, which round-trip through build_block_tables
-		# and inflate_block back here. Rebuilding writes every entry a decode
-		# can read, so the leftover entries never need clearing.
-		var $litlen_scratch = List.repeat(0.U32, Inflate.litlen_enough)
-		var $offset_scratch = List.repeat(0.U32, Inflate.offset_enough)
-		# Whether the scratch lists still hold the static tables, as they do
-		# after a static block until a dynamic one overwrites them, so a run
-		# of static blocks builds them once. libdeflate keeps the same flag.
-		var $static_loaded = False
-		var $static_litlen_mask = 0.U64
+		# The tables round-trip through read_dynamic_header,
+		# build_block_tables and inflate_block back here.
+		var $litlen_scratch = scratch.litlen
+		var $offset_scratch = scratch.offset
+		var $precode_scratch = scratch.precode
+		var $lens_scratch = scratch.lens
+		var $static_loaded = scratch.static_loaded
+		var $static_litlen_mask = scratch.static_litlen_mask
 
 		while $more_blocks {
 			r0 = Inflate.refill(input, $in_next, $bitbuf, $bitsleft, $overread)?
@@ -99,6 +140,9 @@ Inflate := [].{
 				if in_len < $in_next + len {
 					return Err(UnexpectedEnd)
 				} else {}
+				if len > out_limit - List.len($out) {
+					return Err(OutputLimitExceeded)
+				} else {}
 				$out = List.append_sublist($out, input, { start: $in_next, len })
 				$in_next = $in_next + len
 			} else if block_type <= 2 {
@@ -106,11 +150,13 @@ Inflate := [].{
 					if block_type == 2 {
 						# Dynamic Huffman block: read the header and the
 						# run-length-encoded codeword lengths.
-						header = Inflate.read_dynamic_header(input, $in_next, $bitbuf, $bitsleft, $overread)?
+						header = Inflate.read_dynamic_header(input, $in_next, $bitbuf, $bitsleft, $overread, $precode_scratch, $lens_scratch)?
 						$in_next = header.in_next
 						$bitbuf = header.bitbuf
 						$bitsleft = header.bitsleft
 						$overread = header.overread
+						$precode_scratch = header.precode
+						$lens_scratch = header.lens
 						$static_loaded = False
 						Inflate.build_block_tables(header.lens, header.num_litlen_syms, header.num_offset_syms, $litlen_scratch, $offset_scratch) ? |_| Inflate.bad_data(header.bitsleft, header.overread)
 					} else {
@@ -128,7 +174,7 @@ Inflate := [].{
 						}
 					}
 
-				decoded = Inflate.inflate_block(input, $in_next, $bitbuf, $bitsleft, $overread, $out, out_start, tables)?
+				decoded = Inflate.inflate_block(input, $in_next, $bitbuf, $bitsleft, $overread, $out, out_start, out_limit, tables)?
 				$in_next = decoded.in_next
 				$bitbuf = decoded.bitbuf
 				$bitsleft = decoded.bitsleft
@@ -146,7 +192,17 @@ Inflate := [].{
 		if $overread > $bitsleft.shr_zf_wrap(3) {
 			Err(UnexpectedEnd)
 		} else {
-			Ok($out)
+			Ok({
+				scratch: {
+					litlen: $litlen_scratch,
+					offset: $offset_scratch,
+					precode: $precode_scratch,
+					lens: $lens_scratch,
+					static_loaded: $static_loaded,
+					static_litlen_mask: $static_litlen_mask,
+				},
+				out: $out,
+			})
 		}
 	}
 
@@ -162,11 +218,27 @@ Inflate := [].{
 
 	RefillState : { in_next : U64, bitbuf : U64, bitsleft : U64, overread : U64 }
 
+	## The error for output that would pass the limit, with the bitstream in
+	## this state. Output decoded from the implicit zero bytes is not really
+	## there, so then the input ended before the stream did.
+	over_limit : U64, U64 -> [OutputLimitExceeded, UnexpectedEnd]
+	over_limit = |bitsleft, overread|
+		if overread > bitsleft.bitwise_and(255).shr_zf_wrap(3) {
+			UnexpectedEnd
+		} else {
+			OutputLimitExceeded
+		}
+
+	## The most bytes one fast-loop iteration appends: two literals and then
+	## the longest match, or three literals.
+	fast_loop_max_output : U64
+	fast_loop_max_output = 2 + DeflateTables.max_match_len
+
 	## The error for a check that failed with the bitstream in this state.
 	## A failure after any of the implicit zero bytes were consumed means the
 	## input ended before the stream did, whatever the zeros happened to
 	## decode as, so only a failure on real input bits is corrupt data.
-	bad_data : U64, U64 -> [CorruptData, UnexpectedEnd]
+	bad_data : U64, U64 -> [CorruptData, UnexpectedEnd, OutputLimitExceeded]
 	bad_data = |bitsleft, overread|
 		if overread > bitsleft.bitwise_and(255).shr_zf_wrap(3) {
 			UnexpectedEnd
@@ -174,7 +246,7 @@ Inflate := [].{
 			CorruptData
 		}
 
-	refill : List(U8), U64, U64, U64, U64 -> Try(RefillState, [CorruptData, UnexpectedEnd])
+	refill : List(U8), U64, U64, U64, U64 -> Try(RefillState, [CorruptData, UnexpectedEnd, OutputLimitExceeded])
 	refill = |input, in_next, bitbuf, bitsleft_raw, overread| {
 		# Consumes subtract whole decode entries from `bitsleft`, so only its
 		# low byte is meaningful. Recover the exact count once here.
@@ -254,6 +326,11 @@ Inflate := [].{
 	offset_enough : U64
 	offset_enough = 402
 
+	## Room for every litlen and offset code length, plus the worst-case
+	## overrun of a repeat that runs past the total.
+	lens_enough : U64
+	lens_enough = 288 + 32 + 137
+
 	## The static decode-result half of each precode table entry.
 	precode_decode_results : List(U32)
 	precode_decode_results = {
@@ -329,7 +406,7 @@ Inflate := [].{
 	## code by its caller. Every entry a decode can reach is written before
 	## the table is returned, so a previous block's table can be passed back
 	## in as it stands.
-	build_decode_table : List(U8), U64, List(U32), U64, U64, Bool, List(U32) -> Try(BuiltTable, [CorruptData, UnexpectedEnd])
+	build_decode_table : List(U8), U64, List(U32), U64, U64, Bool, List(U32) -> Try(BuiltTable, [CorruptData, UnexpectedEnd, OutputLimitExceeded])
 	build_decode_table = |lens, num_syms, decode_results, max_table_bits, max_codeword_len_limit, dynamic_table_bits, scratch| {
 		# The per-symbol loops below index `lens` by every symbol under
 		# `num_syms` and the per-length tables by codeword lengths up to
@@ -586,7 +663,7 @@ Inflate := [].{
 	## where `lens` holds the litlen lengths followed by the offset lengths.
 	## The scratch lists supply the tables' backing storage, and the
 	## decode-result halves are built once per stream by the caller.
-	build_block_tables : List(U8), U64, U64, List(U32), List(U32) -> Try(BlockTables, [CorruptData, UnexpectedEnd])
+	build_block_tables : List(U8), U64, U64, List(U32), List(U32) -> Try(BlockTables, [CorruptData, UnexpectedEnd, OutputLimitExceeded])
 	build_block_tables = |lens, num_litlen_syms, num_offset_syms, litlen_scratch, offset_scratch| {
 		offset_lens = List.sublist(lens, { start: num_litlen_syms, len: num_offset_syms })
 		offset_built = Inflate.build_decode_table(
@@ -622,6 +699,7 @@ Inflate := [].{
 		lens : List(U8),
 		num_litlen_syms : U64,
 		num_offset_syms : U64,
+		precode : List(U32),
 	}
 
 	## The order precode codeword lengths are stored in.
@@ -633,8 +711,8 @@ Inflate := [].{
 	##
 	## On entry the bitbuffer still holds BFINAL and BTYPE. They are consumed
 	## here together with the counts, exactly as in the template.
-	read_dynamic_header : List(U8), U64, U64, U64, U64 -> Try(DynamicHeader, [CorruptData, UnexpectedEnd])
-	read_dynamic_header = |input, in_next0, bitbuf0, bitsleft0, overread0| {
+	read_dynamic_header : List(U8), U64, U64, U64, U64, List(U32), List(U8) -> Try(DynamicHeader, [CorruptData, UnexpectedEnd, OutputLimitExceeded])
+	read_dynamic_header = |input, in_next0, bitbuf0, bitsleft0, overread0, precode_scratch, lens_scratch| {
 		num_litlen_syms = 257 + bitbuf0.shr_zf_wrap(3).bitwise_and(31)
 		num_offset_syms = 1 + bitbuf0.shr_zf_wrap(8).bitwise_and(31)
 		num_explicit_precode_lens = 4 + bitbuf0.shr_zf_wrap(13).bitwise_and(15)
@@ -673,7 +751,7 @@ Inflate := [].{
 			Inflate.precode_tablebits,
 			7,
 			False,
-			List.repeat(0.U32, Inflate.precode_enough),
+			precode_scratch,
 		) ? |_| Inflate.bad_data($bitsleft, $overread)
 		precode_table = precode_built.table
 		# Every precode lookup below masks with 127, so bounding the table
@@ -684,9 +762,13 @@ Inflate := [].{
 
 		# Decode the litlen and offset codeword lengths. The lens list has
 		# slack for the worst-case repeat overrun (137 extra), so repeats can
-		# be written before the total is range-checked.
+		# be written before the total is range-checked. It is the previous
+		# block's list, so every length is written, the zero runs included.
 		num_lens = num_litlen_syms + num_offset_syms
-		var $lens = List.repeat(0.U8, 288 + 32 + 137)
+		var $lens = lens_scratch
+		if List.len($lens) < Inflate.lens_enough {
+			return Err(CorruptData)
+		} else {}
 		var $n = 0.U64
 		while $n < num_lens {
 			if $bitsleft < 14 {
@@ -732,12 +814,14 @@ Inflate := [].{
 				rep_count = 3 + $bitbuf.bitwise_and(7)
 				$bitbuf = $bitbuf.shr_zf_wrap(3)
 				$bitsleft = $bitsleft - 3
+				$lens = Inflate.write_zeros($lens, $n, rep_count)
 				$n = $n + rep_count
 			} else {
 				# Repeat zero 11-138 times.
 				rep_count = 11 + $bitbuf.bitwise_and(127)
 				$bitbuf = $bitbuf.shr_zf_wrap(7)
 				$bitsleft = $bitsleft - 7
+				$lens = Inflate.write_zeros($lens, $n, rep_count)
 				$n = $n + rep_count
 			}
 		}
@@ -754,7 +838,25 @@ Inflate := [].{
 			lens: $lens,
 			num_litlen_syms,
 			num_offset_syms,
+			precode: precode_table,
 		})
+	}
+
+	## Zero `count` code lengths from `start`, stopping at the end of the list:
+	## a run past the end leaves `n` beyond the total, which is corrupt anyway.
+	write_zeros : List(U8), U64, U64 -> List(U8)
+	write_zeros = |lens, start, count| {
+		end = (start + count).min(List.len(lens))
+		var $lens = lens
+		var $i = start
+		while $i < end {
+			$lens = match List.set($lens, $i, 0) {
+				Ok(set_lens) => set_lens
+				Err(_) => crash "Inflate.write_zeros: the end is bounded by the length"
+			}
+			$i = $i + 1
+		}
+		$lens
 	}
 
 	InflateResult : {
@@ -773,8 +875,8 @@ Inflate := [].{
 	##
 	## `out_start` is where the stream's output begins in `out0`. A match may
 	## reach back across earlier blocks but never before that.
-	inflate_block : List(U8), U64, U64, U64, U64, List(U8), U64, BlockTables -> Try(InflateResult, [CorruptData, UnexpectedEnd])
-	inflate_block = |input, in_next0, bitbuf0, bitsleft0, overread0, out0, out_start, tables| {
+	inflate_block : List(U8), U64, U64, U64, U64, List(U8), U64, U64, BlockTables -> Try(InflateResult, [CorruptData, UnexpectedEnd, OutputLimitExceeded])
+	inflate_block = |input, in_next0, bitbuf0, bitsleft0, overread0, out0, out_start, out_limit, tables| {
 		litlen_table = tables.litlen
 		litlen_mask = tables.litlen_mask
 		offset_table = tables.offset
@@ -814,6 +916,17 @@ Inflate := [].{
 			return Err(CorruptData)
 		} else {}
 
+		# The fast loop runs only while one iteration's worst case still fits
+		# under the output limit, as libdeflate's `out_fastloop_end` does, so
+		# its appends need no checks of their own. The careful loop checks
+		# every symbol, and with less than an iteration's room left it decodes
+		# the few bytes before the limit.
+		out_fast_end = if out_limit >= Inflate.fast_loop_max_output {
+			out_limit - Inflate.fast_loop_max_output + 1
+		} else {
+			0
+		}
+
 		var $entry = 0.U32
 		if $in_next + 24 <= in_len {
 			word0 = U64.from_le_bytes(input, $in_next) ?? 0
@@ -822,7 +935,7 @@ Inflate := [].{
 			$bitsleft = $bitsleft.bitwise_or(56)
 			$entry = (List.get(litlen_table, $bitbuf.bitwise_and(litlen_mask)) ?? 0)
 		} else {}
-		while $done == 0 and $in_next + 24 <= in_len {
+		while $done == 0 and $in_next + 24 <= in_len and List.len($out) < out_fast_end {
 			var $saved_bitbuf = $bitbuf
 			$bitbuf = $bitbuf.shr_zf_wrap($entry.to_u8_wrap())
 			$bitsleft = $bitsleft.minus_wrap($entry.to_u64())
@@ -969,6 +1082,9 @@ Inflate := [].{
 			} else {}
 
 			if $entry.bitwise_and(Inflate.huffdec_literal) != 0 {
+				if List.len($out) >= out_limit {
+					return Err(Inflate.over_limit($bitsleft, $overread))
+				} else {}
 				$out = List.append($out, $entry.shr_zf_wrap(16).to_u8_wrap())
 			} else if $entry.bitwise_and(Inflate.huffdec_end_of_block) != 0 {
 				break
@@ -1007,6 +1123,9 @@ Inflate := [].{
 				out_len = List.len($out)
 				if offset > out_len - out_start or offset == 0 {
 					return Err(Inflate.bad_data($bitsleft, $overread))
+				} else {}
+				if length > out_limit - out_len {
+					return Err(Inflate.over_limit($bitsleft, $overread))
 				} else {}
 
 

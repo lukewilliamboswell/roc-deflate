@@ -16,9 +16,12 @@ import CompressOptimal
 ## `UnexpectedEnd` means the input ran out before the final block ended, so
 ## any truncated stream, an empty input included, reports it. `CorruptData`
 ## means the bytes that are there are not a valid DEFLATE stream.
+## `OutputLimitExceeded` means the stream asked for more output than its
+## `Bounds` allow, and decoding stopped before writing it.
 DeflateError : [
 	CorruptData,
 	UnexpectedEnd,
+	OutputLimitExceeded,
 ]
 
 Deflate := [].{
@@ -113,25 +116,92 @@ Deflate := [].{
 		5 * max_blocks + in_nbytes
 	}
 
-	## Decompress a raw DEFLATE stream.
-	decompress : List(U8) -> Try(List(U8), DeflateError)
-	decompress = |input|
-		Inflate.decompress(input)
+	## Bounds on the bytes one stream appends to its output.
+	##
+	## DEFLATE expands up to about 1032:1, so a small hostile stream can ask
+	## for gigabytes. Decoding stops with `OutputLimitExceeded` before any
+	## write that would take the output past `max_output`, so the output never
+	## holds more than that. `{}` takes the defaults, and
+	## `{ max_output: 65_536 }` names only what differs.
+	##
+	## `expected_size` is a hint for the output's capacity, such as a ZIP
+	## entry's declared uncompressed size. With `Declared(n)`, decoding
+	## reserves `n` bytes up front, never more than `max_output`, so a truthful
+	## size means the output never reallocates. It is not checked: a longer
+	## stream still decodes, growing the output, as long as it stays within
+	## `max_output`. A caller that wants the declared size enforced passes it
+	## as `max_output` too.
+	Bounds := {
+		## The most bytes this stream may append, not counting what `out`
+		## already holds. The default is 1 GiB.
+		max_output : U64 ?? 1_073_741_824,
 
-	## Decompress a raw DEFLATE stream, appending the output to `out`.
+		## How much output capacity to reserve before decoding.
+		expected_size : [Unknown, Declared(U64)] ?? Unknown,
+	}
+
+	## Decompress a raw DEFLATE stream, within `bounds`.
+	##
+	## Without a declared size, the output starts with room for three times
+	## the input, never more than `max_output`.
+	decompress : List(U8), Bounds -> Try(List(U8), DeflateError)
+	decompress = |input, bounds|
+		Inflate.inflate(Inflate.new_scratch(), input, [], bounds.max_output, reserve_for(input, bounds)).output
+
+	## Decompress a raw DEFLATE stream, appending the output to `out`, within
+	## `bounds`.
 	##
 	## Passing a list with enough spare capacity for the whole result means
 	## the decompressor never reallocates mid-stream, and a returned list can
 	## be emptied with its capacity kept and passed back in for the next
-	## stream.
+	## stream. A `Declared` size reserves that much past what `out` holds.
 	##
 	## The stream cannot refer back into the bytes `out` already holds. A
 	## match that reaches past the start of the stream's own output is
 	## `CorruptData`, the same as with an empty `out`.
-	decompress_into : List(U8), List(U8) -> Try(List(U8), DeflateError)
-	decompress_into = |input, out|
-		Inflate.decompress_into(input, out)
+	decompress_into : List(U8), List(U8), Bounds -> Try(List(U8), DeflateError)
+	decompress_into = |input, out, bounds| {
+		reserve = match bounds.expected_size {
+			Declared(n) => n
+			Unknown => 0
+		}
+		Inflate.inflate(Inflate.new_scratch(), input, out, bounds.max_output, reserve).output
+	}
+
+	## The decode tables and scratch space a decompression works in, kept
+	## between streams.
+	##
+	## `decompress` allocates about 12 KB of tables for every stream.
+	## Decoding many streams, such as the entries of a ZIP archive, through
+	## one `Decoder` allocates them once, as libdeflate's
+	## `libdeflate_alloc_decompressor` does. The output is the same as
+	## `decompress` gives.
+	Decoder :: { scratch : Inflate.Scratch }
+
+	## A decoder for `decompress_with`.
+	decoder : () -> Decoder
+	decoder = || { scratch: Inflate.new_scratch() }
+
+	## Decompress a raw DEFLATE stream within `bounds`, using the decoder's
+	## tables, and hand the decoder back for the next stream.
+	##
+	## A stream that fails may leave the tables half built, so the decoder
+	## handed back after an error has fresh ones.
+	decompress_with : Decoder, List(U8), Bounds -> { decoder : Decoder, output : Try(List(U8), DeflateError) }
+	decompress_with = |dec, input, bounds| {
+		done = Inflate.inflate(dec.scratch, input, [], bounds.max_output, reserve_for(input, bounds))
+		{ decoder: { scratch: done.scratch }, output: done.output }
+	}
 }
+
+# The capacity to reserve for a stream's output: the declared size, or else
+# three times the input, which `Inflate.inflate` caps at the bound.
+reserve_for : List(U8), Deflate.Bounds -> U64
+reserve_for = |input, bounds|
+	match bounds.expected_size {
+		Declared(n) => n
+		Unknown => List.len(input).min(U64.highest // 3) * 3
+	}
 
 # Emit the input as stored blocks, which is what the format requires even
 # for empty input.
@@ -237,41 +307,124 @@ optimal_params_for = |level|
 # the decoder's error cases in bulk.
 
 # A final fixed Huffman block holding only the end-of-block code.
-expect Deflate.decompress([0x03, 0x00]) == Ok([])
+expect Deflate.decompress([0x03, 0x00], {}) == Ok([])
 
 # A final stored block of "Hello": LEN 5, then NLEN, its complement.
-expect Deflate.decompress([0x01, 0x05, 0x00, 0xFA, 0xFF, 0x48, 0x65, 0x6C, 0x6C, 0x6F]) == Ok("Hello".to_utf8())
+expect Deflate.decompress([0x01, 0x05, 0x00, 0xFA, 0xFF, 0x48, 0x65, 0x6C, 0x6C, 0x6F], {}) == Ok("Hello".to_utf8())
 
 # The same block with an NLEN that is not LEN's complement.
-expect Deflate.decompress([0x01, 0x05, 0x00, 0xFB, 0xFF, 0x48, 0x65, 0x6C, 0x6C, 0x6F]) == Err(CorruptData)
+expect Deflate.decompress([0x01, 0x05, 0x00, 0xFB, 0xFF, 0x48, 0x65, 0x6C, 0x6C, 0x6F], {}) == Err(CorruptData)
 
 # BTYPE 3 is reserved.
-expect Deflate.decompress([0x07]) == Err(CorruptData)
+expect Deflate.decompress([0x07], {}) == Err(CorruptData)
 
 # Input that ends before the stream does, the empty input included, wherever
 # it stops: in a block header, in a stored block's payload, or in a dynamic
 # block's code lengths.
-expect Deflate.decompress([]) == Err(UnexpectedEnd)
+expect Deflate.decompress([], {}) == Err(UnexpectedEnd)
 
-expect Deflate.decompress([0x03]) == Err(UnexpectedEnd)
+expect Deflate.decompress([0x03], {}) == Err(UnexpectedEnd)
 
-expect Deflate.decompress([0x01, 0x05, 0x00, 0xFA, 0xFF, 0x48, 0x65]) == Err(UnexpectedEnd)
+expect Deflate.decompress([0x01, 0x05, 0x00, 0xFA, 0xFF, 0x48, 0x65], {}) == Err(UnexpectedEnd)
 
 expect {
 	stream = Deflate.compress("abcdefghijklmnopqrstuvwxyz, abcdefghijklmnopqrstuvwxyz, and the alphabet again".to_utf8(), 6)
-	Deflate.decompress(List.sublist(stream, { start: 0, len: 3 })) == Err(UnexpectedEnd)
+	Deflate.decompress(List.sublist(stream, { start: 0, len: 3 }), {}) == Err(UnexpectedEnd)
 }
 
 # A fixed block holding one match, length 3 at distance 3, with no output
 # before it to copy from.
-expect Deflate.decompress([0x03, 0x22, 0x00]) == Err(CorruptData)
+expect Deflate.decompress([0x03, 0x22, 0x00], {}) == Err(CorruptData)
 
 # The bytes `out` already holds are not part of the stream, so the match is
 # just as corrupt when there is something there to copy.
-expect Deflate.decompress_into([0x03, 0x22, 0x00], [1, 2, 3]) == Err(CorruptData)
+expect Deflate.decompress_into([0x03, 0x22, 0x00], [1, 2, 3], {}) == Err(CorruptData)
 
 # The output is appended to what `out` holds.
-expect Deflate.decompress_into([0x01, 0x05, 0x00, 0xFA, 0xFF, 0x48, 0x65, 0x6C, 0x6C, 0x6F], [1, 2]) == Ok([1, 2, 0x48, 0x65, 0x6C, 0x6C, 0x6F])
+expect Deflate.decompress_into([0x01, 0x05, 0x00, 0xFA, 0xFF, 0x48, 0x65, 0x6C, 0x6C, 0x6F], [1, 2], {}) == Ok([1, 2, 0x48, 0x65, 0x6C, 0x6C, 0x6F])
+
+# A stored block is checked against the bound before its copy: five bytes fit
+# a bound of five and not one of four, counting from what `out` holds.
+expect Deflate.decompress([0x01, 0x05, 0x00, 0xFA, 0xFF, 0x48, 0x65, 0x6C, 0x6C, 0x6F], { max_output: 5 }) == Ok("Hello".to_utf8())
+
+expect Deflate.decompress([0x01, 0x05, 0x00, 0xFA, 0xFF, 0x48, 0x65, 0x6C, 0x6C, 0x6F], { max_output: 4 }) == Err(OutputLimitExceeded)
+
+expect Deflate.decompress_into([0x01, 0x05, 0x00, 0xFA, 0xFF, 0x48, 0x65, 0x6C, 0x6C, 0x6F], [1, 2], { max_output: 5 }) == Ok([1, 2, 0x48, 0x65, 0x6C, 0x6C, 0x6F])
+
+# A truncated stream is still truncated under a bound it would pass.
+expect Deflate.decompress([0x01, 0x05, 0x00, 0xFA, 0xFF, 0x48, 0x65], { max_output: 1 }) == Err(UnexpectedEnd)
+
+# Huffman blocks give exactly their output at a bound of its length and stop
+# one byte short of it, through both the fast loop and the careful loop:
+# short inputs only reach the careful loop, the long run mostly the fast one,
+# and the bound lands anywhere in a match or a run of literals.
+expect {
+	text = "the cat, the cow, the crow, then the cricket saw the cow again and again".to_utf8()
+	inputs = [text, List.join(List.repeat(text, 200)), List.repeat(0.U8, 100_000)]
+	var $ok = True
+	for input in inputs {
+		len = List.len(input)
+		for level in [1, 6, 12] {
+			compressed = Deflate.compress(input, level)
+			for max_output in [len, len + 1, len - 1, len // 2, len - len.min(300), 0] {
+				expected = if len <= max_output {
+					Ok(input)
+				} else {
+					Err(OutputLimitExceeded)
+				}
+				if Deflate.decompress(compressed, { max_output: max_output }) != expected {
+					$ok = False
+				} else {}
+				if Deflate.decompress(compressed, { max_output: max_output, expected_size: Declared(len) }) != expected {
+					$ok = False
+				} else {}
+			}
+		}
+	}
+	$ok
+}
+
+# A declared size is a hint, not a check: a stream longer or shorter than it
+# still decodes, and a size far above the bound reserves no more than the
+# bound.
+expect {
+	input = List.repeat(7.U8, 5000)
+	compressed = Deflate.compress(input, 6)
+	Deflate.decompress(compressed, { expected_size: Declared(10) }) == Ok(input)
+		and Deflate.decompress(compressed, { expected_size: Declared(1_000_000) }) == Ok(input)
+		and Deflate.decompress(compressed, { max_output: 4999, expected_size: Declared(U64.highest) }) == Err(OutputLimitExceeded)
+}
+
+# One decoder gives the same output as `decompress` stream after stream,
+# whatever block types follow each other, and after a failed stream too.
+expect {
+	text = "the cat, the cow, the crow, then the cricket saw the cow again and again".to_utf8()
+	long = List.join(List.repeat(text, 50))
+	streams = [
+		Deflate.compress(long, 6),
+		Deflate.compress(text, 1),
+		[0x03, 0x22, 0x00],
+		Deflate.compress(long, 12),
+		[0x01, 0x05, 0x00, 0xFA, 0xFF, 0x48, 0x65, 0x6C, 0x6C, 0x6F],
+		Deflate.compress(text, 0),
+		Deflate.compress(long, 9),
+		Deflate.compress(long, 4),
+	]
+	all_bounds : List(Deflate.Bounds)
+	all_bounds = [{}, { max_output: 100 }]
+	var $dec = Deflate.decoder()
+	var $ok = True
+	for stream in streams {
+		for bounds in all_bounds {
+			done = Deflate.decompress_with($dec, stream, bounds)
+			if done.output != Deflate.decompress(stream, bounds) {
+				$ok = False
+			} else {}
+			$dec = done.decoder
+		}
+	}
+	$ok
+}
 
 # Every level round-trips the shortest inputs and the two lengths either side
 # of its passthrough limit, the longest input it stores without trying to
@@ -285,7 +438,7 @@ expect {
 		for len in [0, 1, 2, 3, 4, 5, limit, limit + 1] {
 			original = List.sublist(text, { start: 0, len })
 			compressed = Deflate.compress(original, level)
-			if Deflate.decompress(compressed) != Ok(original) or List.len(compressed) > Deflate.compress_bound(len) {
+			if Deflate.decompress(compressed, {}) != Ok(original) or List.len(compressed) > Deflate.compress_bound(len) {
 				$ok = False
 			} else {}
 		}
@@ -303,7 +456,7 @@ expect {
 	var $ok = True
 	for level in Deflate.Level.all {
 		compressed = Deflate.compress(noise, level)
-		if Deflate.decompress(compressed) != Ok(noise) or List.len(compressed) > Deflate.compress_bound(3000) {
+		if Deflate.decompress(compressed, {}) != Ok(noise) or List.len(compressed) > Deflate.compress_bound(3000) {
 			$ok = False
 		} else {}
 	}
