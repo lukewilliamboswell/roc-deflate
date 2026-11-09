@@ -11,7 +11,9 @@
 ## real gzip's streams, and libdeflate proves our output is the same bytes as
 ## the library this package ports, at every level and at the input lengths
 ## where some level changes behavior. tests/ratios.roc compresses the committed
-## Canterbury corpus and fails on a ratio regression.
+## Canterbury corpus and fails on a ratio regression. Last, fuzz.roc builds
+## every fuzz target, checks its examples and allocation ceilings, and explores
+## each for two seconds.
 ##
 ## harness and ratios are built with --opt=speed, the LLVM backend the README
 ## numbers come from, so both exercise the same code the benchmark measures.
@@ -26,6 +28,7 @@ app [main!] {
 import pf.Stdout
 import pf.Cmd
 import pf.OsStr
+import pf.System
 
 main! = |_| {
 	Stdout.line!("== unit tests")?
@@ -38,6 +41,21 @@ main! = |_| {
 	Stdout.line!("== compression-ratio gate (compiled --opt=speed)")?
 	build!("tests/ratios.roc", "tests/ratios")?
 	run!("./tests/ratios", [])?
+
+	# roc-fuzz's platform runs on Linux x86-64 and Apple Silicon macOS only.
+	target = System.target!()
+	fuzzable =
+		match (target.os(), target.arch()) {
+			(Linux(_), X64) => True
+			(MacOS(_), Arm64) => True
+			_ => False
+		}
+	if fuzzable {
+		Stdout.line!("== fuzz targets: examples, allocation ceilings, and a short exploration")?
+		run!("roc", ["fuzz.roc"])?
+	} else {
+		Stdout.line!("== fuzz targets: skipped, roc-fuzz runs on Linux x86-64 and Apple Silicon macOS")?
+	}
 	Ok({})
 }
 

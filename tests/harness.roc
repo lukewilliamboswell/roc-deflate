@@ -36,6 +36,7 @@ import pf.OsStr
 import deflate.Deflate
 import crc32.Crc32
 import TextGen
+import "../fuzz/bomb.deflate" as bomb : List(U8)
 
 main! = |args| {
 	# `+ args.len()` keeps the corpus size runtime-dependent. With a literal
@@ -94,6 +95,16 @@ main! = |args| {
 
 	Stdout.line!("== decoder errors")?
 	check_decoder_errors!(List.sublist(corpus, { start: 0, len: 4096 }), tmp)?
+
+	# fuzz/inflate_bomb.roc decodes a pinned stream, so check it is still what
+	# level 6 makes of 8 MiB of zeros. `+ args.len()` keeps the compression out
+	# of the build, as with the corpus above.
+	Stdout.line!("== fuzz fixture")?
+	if Deflate.compress(List.repeat(0, 8_388_608 + args.len()), 6) != bomb {
+		Stdout.line!("  fuzz/bomb.deflate is not Deflate.compress(List.repeat(0, 8_388_608), 6)")?
+		return Err(Exit(1))
+	}
+	Stdout.line!("  fuzz/bomb.deflate is level 6 on 8 MiB of zeros")?
 
 	Path.delete!(corpus_path) ? |_| Exit(1)
 	Stdout.line!("All interop checks passed")?
