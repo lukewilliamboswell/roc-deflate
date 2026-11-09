@@ -15,7 +15,7 @@ Bench := [].{
 		if $buf != item.expected {
 			crash "libdeflate output differs"
 		}
-		decoded = Deflate.decompress($buf) ?? crash "decompression failed"
+		decoded = Deflate.decompress($buf, {}) ?? crash "decompression failed"
 		if decoded != input {
 			crash "round-trip differs"
 		}

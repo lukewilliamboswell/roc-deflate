@@ -26,7 +26,7 @@ main! = |args| {
 	data = Path.read_bytes!(Path.from_os_str(path_os)) ? |_| Exit(5)
 
 	first = Deflate.compress(data, level)
-	back = Deflate.decompress(first) ? |_| Exit(7)
+	back = Deflate.decompress(first, {}) ? |_| Exit(7)
 	if back != data {
 		Stdout.line!("VERIFY FAIL") ? |_| Exit(8)
 		return Err(Exit(8))
