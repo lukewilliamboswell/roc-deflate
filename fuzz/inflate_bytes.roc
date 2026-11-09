@@ -72,8 +72,8 @@ test! = |input| {
 max_bound : U64
 max_bound = 1_048_576
 
-# Measured on nightly-2026-11-07-ad3a5d2 over a 1,970-input corpus: at most
-# 12,950 + 3 * max_output. The fixed part is the decoder's state, its decode
+# Measured on nightly-2026-11-07-ad3a5d2 over a 2,101-input corpus: at most
+# 12,921 + 3 * max_output. The fixed part is the decoder's state, its decode
 # tables, code lengths and counting-sort lists. Without a declared size the
 # output starts at three times the input and grows as a list does, and a
 # reallocation briefly holds the old buffer and a larger new one.

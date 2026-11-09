@@ -102,7 +102,9 @@ compress_ceiling = |level, len|
 	}
 
 # The most bytes compressing an input of at most 256 bytes requests, measured
-# alongside `compress_ceiling`: the tables, and little else. Short inputs are
+# alongside `compress_ceiling` over 2,352 inputs (at most 172,128, 303,475 and
+# 669,218): the tables, and little else; levels 10 to 12 vary with the number
+# of optimization passes. Short inputs are
 # where buffers sized for the longest block used to cost the most.
 short_input_requested_ceiling : U64 -> U64
 short_input_requested_ceiling = |level|
@@ -113,7 +115,7 @@ short_input_requested_ceiling = |level|
 	} else if level <= 9 {
 		304_000
 	} else {
-		641_000
+		680_000
 	}
 
 # Measured on nightly-2026-11-07-ad3a5d2 alongside `compress_ceiling`, over
