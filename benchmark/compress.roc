@@ -24,7 +24,7 @@
 ##     nix develop -c ./benchmark/compress.roc 6
 ##     CORPUS_FILES="xml dickens" nix develop -c ./benchmark/compress.roc 1 1 2
 app [main!] {
-	pf: platform "https://github.com/roc-lang/basic-cli/releases/download/0.26.0/GddgvsGjiNXrHFW6au5i5dUDbTs8FinQdrgE2Gqmw53t.tar.zst",
+	pf: platform "https://github.com/roc-lang/basic-cli/releases/download/0.27.0/9yjxqdGTP4xSpSEmDazwTmRsehfRZzA19pwEKkR6fj1g.tar.zst",
 }
 
 import pf.Stdout
