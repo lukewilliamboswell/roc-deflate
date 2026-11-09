@@ -18,10 +18,10 @@ Inflate := [].{
 	## `libdeflate_alloc_decompressor` does.
 	##
 	## The litlen and offset decode tables are rebuilt for every dynamic block
-	## but into the same allocations, and so are the precode table, the code
-	## lengths and the counting-sort lists a table build works in. The
-	## decode-result halves of the table entries are built once here, rather
-	## than for every block that reads them. Rebuilding writes every entry a decode can read,
+	## but into the same allocations, and so are the precode table and the
+	## two counting-sort lists a table build reads before it writes. The lists
+	## a build needs zeroed, the code lengths and the length counts, are taken
+	## fresh: a zeroed allocation is cheaper than clearing a reused list. Rebuilding writes every entry a decode can read,
 	## so leftover entries never need clearing. `static_loaded` says the
 	## litlen and offset tables still hold the static Huffman codes, as they do
 	## after a static block until a dynamic one overwrites them, so a run of
@@ -31,14 +31,8 @@ Inflate := [].{
 		litlen : List(U32),
 		offset : List(U32),
 		precode : List(U32),
-		lens : List(U8),
-		precode_lens : List(U8),
-		counts : List(U64),
 		offsets : List(U64),
 		sorted : List(U16),
-		precode_results : List(U32),
-		litlen_results : List(U32),
-		offset_results : List(U32),
 		static_loaded : Bool,
 		static_litlen_mask : U64,
 	}
@@ -49,14 +43,8 @@ Inflate := [].{
 		litlen: List.repeat(0.U32, Inflate.litlen_enough),
 		offset: List.repeat(0.U32, Inflate.offset_enough),
 		precode: List.repeat(0.U32, Inflate.precode_enough),
-		lens: List.repeat(0.U8, Inflate.lens_enough),
-		precode_lens: [],
-		counts: [],
 		offsets: [],
 		sorted: [],
-		precode_results: Inflate.precode_decode_results,
-		litlen_results: Inflate.litlen_decode_results,
-		offset_results: Inflate.offset_decode_results,
 		static_loaded: False,
 		static_litlen_mask: 0,
 	}
@@ -115,14 +103,8 @@ Inflate := [].{
 		var $litlen_scratch = scratch.litlen
 		var $offset_scratch = scratch.offset
 		var $precode_scratch = scratch.precode
-		var $lens_scratch = scratch.lens
-		var $precode_lens_scratch = scratch.precode_lens
-		var $counts = scratch.counts
 		var $offsets = scratch.offsets
 		var $sorted = scratch.sorted
-		precode_results = scratch.precode_results
-		litlen_results = scratch.litlen_results
-		offset_results = scratch.offset_results
 		var $static_loaded = scratch.static_loaded
 		var $static_litlen_mask = scratch.static_litlen_mask
 
@@ -182,17 +164,14 @@ Inflate := [].{
 						# the build below is the only holder of the ones it
 						# mutates. Read through the record, they stay shared
 						# with it, and the build copies them.
-						{ in_next: h_in_next, bitbuf: h_bitbuf, bitsleft: h_bitsleft, overread: h_overread, lens: h_lens, num_litlen_syms, num_offset_syms, precode: h_precode, precode_lens: h_precode_lens, counts: h_counts, offsets: h_offsets, sorted: h_sorted } = Inflate.read_dynamic_header(input, $in_next, $bitbuf, $bitsleft, $overread, $precode_scratch, $lens_scratch, $precode_lens_scratch, $counts, $offsets, $sorted, precode_results)?
+						{ in_next: h_in_next, bitbuf: h_bitbuf, bitsleft: h_bitsleft, overread: h_overread, lens: h_lens, num_litlen_syms, num_offset_syms, precode: h_precode, offsets: h_offsets, sorted: h_sorted } = Inflate.read_dynamic_header(input, $in_next, $bitbuf, $bitsleft, $overread, $precode_scratch, $offsets, $sorted)?
 						$in_next = h_in_next
 						$bitbuf = h_bitbuf
 						$bitsleft = h_bitsleft
 						$overread = h_overread
 						$precode_scratch = h_precode
-						$precode_lens_scratch = h_precode_lens
 						$static_loaded = False
-						built = Inflate.build_block_tables(h_lens, num_litlen_syms, num_offset_syms, $litlen_scratch, $offset_scratch, h_counts, h_offsets, h_sorted, litlen_results, offset_results) ? |_| Inflate.bad_data(h_bitsleft, h_overread)
-						$lens_scratch = h_lens
-						$counts = built.counts
+						built = Inflate.build_block_tables(h_lens, num_litlen_syms, num_offset_syms, $litlen_scratch, $offset_scratch, h_offsets, h_sorted) ? |_| Inflate.bad_data(h_bitsleft, h_overread)
 						$offsets = built.offsets
 						$sorted = built.sorted
 						{ litlen: built.litlen, litlen_mask: built.litlen_mask, offset: built.offset }
@@ -204,10 +183,9 @@ Inflate := [].{
 						if $static_loaded {
 							{ litlen: $litlen_scratch, litlen_mask: $static_litlen_mask, offset: $offset_scratch }
 						} else {
-							built = Inflate.build_block_tables(Inflate.static_lens, 288, 32, $litlen_scratch, $offset_scratch, $counts, $offsets, $sorted, litlen_results, offset_results)?
+							built = Inflate.build_block_tables(Inflate.static_lens, 288, 32, $litlen_scratch, $offset_scratch, $offsets, $sorted)?
 							$static_loaded = True
 							$static_litlen_mask = built.litlen_mask
-							$counts = built.counts
 							$offsets = built.offsets
 							$sorted = built.sorted
 							{ litlen: built.litlen, litlen_mask: built.litlen_mask, offset: built.offset }
@@ -237,14 +215,8 @@ Inflate := [].{
 					litlen: $litlen_scratch,
 					offset: $offset_scratch,
 					precode: $precode_scratch,
-					lens: $lens_scratch,
-					precode_lens: $precode_lens_scratch,
-					counts: $counts,
 					offsets: $offsets,
 					sorted: $sorted,
-					precode_results,
-					litlen_results,
-					offset_results,
 					static_loaded: $static_loaded,
 					static_litlen_mask: $static_litlen_mask,
 				},
@@ -389,15 +361,6 @@ Inflate := [].{
 	max_num_syms : U64
 	max_num_syms = 288
 
-	## A list of `n` zeros, reusing `list` when it already has that length.
-	cleared : List(U64), U64 -> List(U64)
-	cleared = |list, n|
-		if List.len(list) == n {
-			List.map(list, |_| 0)
-		} else {
-			List.repeat(0, n)
-		}
-
 	## A list of `n` elements whose contents do not matter beyond a zero
 	## first element, reusing `list` when it already has that length. That
 	## covers the offsets, whose first entry counts up from zero while every
@@ -494,7 +457,7 @@ Inflate := [].{
 	make_entry = |decode_results, sym, len|
 		(List.get(decode_results, sym) ?? 0) + len.shl_wrap(8) + len
 
-	BuiltTable : { table : List(U32), table_bits : U64, counts : List(U64), offsets : List(U64), sorted : List(U16) }
+	BuiltTable : { table : List(U32), table_bits : U64, offsets : List(U64), sorted : List(U16) }
 
 	## Build a decode table for one canonical Huffman code from its codeword
 	## lengths. Ported from `build_decode_table`. See that function for the
@@ -507,11 +470,11 @@ Inflate := [].{
 	## `scratch` supplies the table's backing storage, sized `enough` for the
 	## code by its caller. Every entry a decode can reach is written before
 	## the table is returned, so a previous block's table can be passed back
-	## in as it stands. `counts`, `offsets` and `sorted` are a previous
-	## build's counting-sort lists, handed back for the next one: the counts
-	## are cleared here, and the rest are written before they are read.
-	build_decode_table : List(U8), U64, List(U32), U64, U64, Bool, List(U32), List(U64), List(U64), List(U16) -> Try(BuiltTable, [CorruptData, UnexpectedEnd, OutputLimitExceeded])
-	build_decode_table = |lens, num_syms, decode_results, max_table_bits, max_codeword_len_limit, dynamic_table_bits, scratch, counts0, offsets0, sorted0| {
+	## in as it stands. `offsets` and `sorted` are a previous build's
+	## counting-sort lists, handed back for the next one, since a build writes
+	## every entry of them it reads.
+	build_decode_table : List(U8), U64, List(U32), U64, U64, Bool, List(U32), List(U64), List(U16) -> Try(BuiltTable, [CorruptData, UnexpectedEnd, OutputLimitExceeded])
+	build_decode_table = |lens, num_syms, decode_results, max_table_bits, max_codeword_len_limit, dynamic_table_bits, scratch, offsets0, sorted0| {
 		# The per-symbol loops below index `lens` by every symbol under
 		# `num_syms` and the per-length tables by codeword lengths up to
 		# `max_codeword_len_limit`. Bounding everything once up front keeps
@@ -520,9 +483,7 @@ Inflate := [].{
 			return Err(CorruptData)
 		} else {}
 		# Count codewords of each length, including length 0.
-		# The counting lists keep one size for every code, so the precode and
-		# the litlen and offset codes share them without resizing.
-		var $len_counts = Inflate.cleared(counts0, Inflate.max_codeword_len + 1)
+		var $len_counts = List.repeat(0.U64, Inflate.max_codeword_len + 1)
 		if List.len($len_counts) <= max_codeword_len_limit {
 			return Err(CorruptData)
 		} else {}
@@ -626,7 +587,7 @@ Inflate := [].{
 				}
 				$i = $i + 1
 			}
-			return Ok({ table: $table0, table_bits, counts: $len_counts, offsets: $offsets, sorted: $sorted_syms })
+			return Ok({ table: $table0, table_bits, offsets: $offsets, sorted: $sorted_syms })
 		} else {}
 
 		# The code is complete: enumerate codewords in lexicographic order,
@@ -665,7 +626,7 @@ Inflate := [].{
 						$cur_table_end = $cur_table_end.shl_wrap(1)
 						$len = $len + 1
 					}
-					return Ok({ table: $table, table_bits, counts: $len_counts, offsets: $offsets, sorted: $sorted_syms })
+					return Ok({ table: $table, table_bits, offsets: $offsets, sorted: $sorted_syms })
 				} else {}
 
 				# Advance to the lexicographically next bit-reversed codeword.
@@ -740,7 +701,7 @@ Inflate := [].{
 			}
 
 			if $codeword == 1.U64.shl_wrap($len.to_u8_wrap()) - 1 {
-				return Ok({ table: $table, table_bits, counts: $len_counts, offsets: $offsets, sorted: $sorted_syms })
+				return Ok({ table: $table, table_bits, offsets: $offsets, sorted: $sorted_syms })
 			} else {}
 			flipped2 = $codeword.bitwise_xor(1.U64.shl_wrap($len.to_u8_wrap()) - 1).to_u32_wrap()
 			bit_index2 = 31 - U32.count_leading_zero_bits(flipped2)
@@ -769,34 +730,32 @@ Inflate := [].{
 	## where `lens` holds the litlen lengths followed by the offset lengths.
 	## The scratch lists supply the tables' backing storage, and the
 	## decode-result halves are built once per stream by the caller.
-	BuiltBlock : { litlen : List(U32), litlen_mask : U64, offset : List(U32), counts : List(U64), offsets : List(U64), sorted : List(U16) }
+	BuiltBlock : { litlen : List(U32), litlen_mask : U64, offset : List(U32), offsets : List(U64), sorted : List(U16) }
 
-	build_block_tables : List(U8), U64, U64, List(U32), List(U32), List(U64), List(U64), List(U16), List(U32), List(U32) -> Try(BuiltBlock, [CorruptData, UnexpectedEnd, OutputLimitExceeded])
-	build_block_tables = |lens, num_litlen_syms, num_offset_syms, litlen_scratch, offset_scratch, counts, offsets, sorted, litlen_results, offset_results| {
+	build_block_tables : List(U8), U64, U64, List(U32), List(U32), List(U64), List(U16) -> Try(BuiltBlock, [CorruptData, UnexpectedEnd, OutputLimitExceeded])
+	build_block_tables = |lens, num_litlen_syms, num_offset_syms, litlen_scratch, offset_scratch, offsets, sorted| {
 		offset_lens = List.sublist(lens, { start: num_litlen_syms, len: num_offset_syms })
 		# Destructured, so the counting lists move on to the litlen build
 		# rather than staying shared with this record, which would copy them.
-		{ table: offset_table, table_bits: _, counts: offset_counts, offsets: offset_offsets, sorted: offset_sorted } = Inflate.build_decode_table(
+		{ table: offset_table, table_bits: _, offsets: offset_offsets, sorted: offset_sorted } = Inflate.build_decode_table(
 			offset_lens,
 			num_offset_syms,
-			offset_results,
+			Inflate.offset_decode_results,
 			Inflate.offset_tablebits,
 			15,
 			False,
 			offset_scratch,
-			counts,
 			offsets,
 			sorted,
 		)?
 		litlen_built = Inflate.build_decode_table(
 			List.sublist(lens, { start: 0, len: num_litlen_syms }),
 			num_litlen_syms,
-			litlen_results,
+			Inflate.litlen_decode_results,
 			Inflate.litlen_tablebits,
 			15,
 			True,
 			litlen_scratch,
-			offset_counts,
 			offset_offsets,
 			offset_sorted,
 		)?
@@ -804,7 +763,6 @@ Inflate := [].{
 			litlen: litlen_built.table,
 			litlen_mask: 1.U64.shl_wrap(litlen_built.table_bits.to_u8_wrap()) - 1,
 			offset: offset_table,
-			counts: litlen_built.counts,
 			offsets: litlen_built.offsets,
 			sorted: litlen_built.sorted,
 		})
@@ -819,8 +777,6 @@ Inflate := [].{
 		num_litlen_syms : U64,
 		num_offset_syms : U64,
 		precode : List(U32),
-		precode_lens : List(U8),
-		counts : List(U64),
 		offsets : List(U64),
 		sorted : List(U16),
 	}
@@ -834,15 +790,15 @@ Inflate := [].{
 	##
 	## On entry the bitbuffer still holds BFINAL and BTYPE. They are consumed
 	## here together with the counts, exactly as in the template.
-	read_dynamic_header : List(U8), U64, U64, U64, U64, List(U32), List(U8), List(U8), List(U64), List(U64), List(U16), List(U32) -> Try(DynamicHeader, [CorruptData, UnexpectedEnd, OutputLimitExceeded])
-	read_dynamic_header = |input, in_next0, bitbuf0, bitsleft0, overread0, precode_scratch, lens_scratch, precode_lens_scratch, counts, offsets, sorted, precode_results| {
+	read_dynamic_header : List(U8), U64, U64, U64, U64, List(U32), List(U64), List(U16) -> Try(DynamicHeader, [CorruptData, UnexpectedEnd, OutputLimitExceeded])
+	read_dynamic_header = |input, in_next0, bitbuf0, bitsleft0, overread0, precode_scratch, offsets, sorted| {
 		num_litlen_syms = 257 + bitbuf0.shr_zf_wrap(3).bitwise_and(31)
 		num_offset_syms = 1 + bitbuf0.shr_zf_wrap(8).bitwise_and(31)
 		num_explicit_precode_lens = 4 + bitbuf0.shr_zf_wrap(13).bitwise_and(15)
 
 		# A 64-bit refill holds 18 three-bit precode lengths, one short of the
 		# maximum 19, so the first length is taken from the header refill.
-		var $precode_lens = if List.len(precode_lens_scratch) == 19 { List.map(precode_lens_scratch, |_| 0) } else { List.repeat(0.U8, 19) }
+		var $precode_lens = List.repeat(0.U8, 19)
 		first_slot = (List.get(Inflate.precode_lens_permutation, 0) ?? 0).to_u64()
 		$precode_lens = match List.set($precode_lens, first_slot, bitbuf0.shr_zf_wrap(17).bitwise_and(7).to_u8_wrap()) {
 			Ok(set_precode_lens) => set_precode_lens
@@ -870,12 +826,11 @@ Inflate := [].{
 		precode_built = Inflate.build_decode_table(
 			$precode_lens,
 			19,
-			precode_results,
+			Inflate.precode_decode_results,
 			Inflate.precode_tablebits,
 			7,
 			False,
 			precode_scratch,
-			counts,
 			offsets,
 			sorted,
 		) ? |_| Inflate.bad_data($bitsleft, $overread)
@@ -888,13 +843,9 @@ Inflate := [].{
 
 		# Decode the litlen and offset codeword lengths. The lens list has
 		# slack for the worst-case repeat overrun (137 extra), so repeats can
-		# be written before the total is range-checked. It is the previous
-		# block's list, so every length is written, the zero runs included.
+		# be written before the total is range-checked.
 		num_lens = num_litlen_syms + num_offset_syms
-		var $lens = lens_scratch
-		if List.len($lens) < Inflate.lens_enough {
-			return Err(CorruptData)
-		} else {}
+		var $lens = List.repeat(0.U8, Inflate.lens_enough)
 		var $n = 0.U64
 		while $n < num_lens {
 			if $bitsleft < 14 {
@@ -940,14 +891,12 @@ Inflate := [].{
 				rep_count = 3 + $bitbuf.bitwise_and(7)
 				$bitbuf = $bitbuf.shr_zf_wrap(3)
 				$bitsleft = $bitsleft - 3
-				$lens = Inflate.write_zeros($lens, $n, rep_count)
 				$n = $n + rep_count
 			} else {
 				# Repeat zero 11-138 times.
 				rep_count = 11 + $bitbuf.bitwise_and(127)
 				$bitbuf = $bitbuf.shr_zf_wrap(7)
 				$bitsleft = $bitsleft - 7
-				$lens = Inflate.write_zeros($lens, $n, rep_count)
 				$n = $n + rep_count
 			}
 		}
@@ -965,28 +914,9 @@ Inflate := [].{
 			num_litlen_syms,
 			num_offset_syms,
 			precode: precode_table,
-			precode_lens: $precode_lens,
-			counts: precode_built.counts,
 			offsets: precode_built.offsets,
 			sorted: precode_built.sorted,
 		})
-	}
-
-	## Zero `count` code lengths from `start`, stopping at the end of the list:
-	## a run past the end leaves `n` beyond the total, which is corrupt anyway.
-	write_zeros : List(U8), U64, U64 -> List(U8)
-	write_zeros = |lens, start, count| {
-		end = (start + count).min(List.len(lens))
-		var $lens = lens
-		var $i = start
-		while $i < end {
-			$lens = match List.set($lens, $i, 0) {
-				Ok(set_lens) => set_lens
-				Err(_) => crash "Inflate.write_zeros: the end is bounded by the length"
-			}
-			$i = $i + 1
-		}
-		$lens
 	}
 
 	InflateResult : {

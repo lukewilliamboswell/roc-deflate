@@ -28,7 +28,9 @@ Input := { texts : List(List(Plaintext.Piece)), level : U64 }.{
 ## Allocation ratchets, which only ever move down: the state is allocated
 ## once, not once per stream. Through one compressor every stream but the
 ## first allocates none of its level's fixed matchfinder tables, and through
-## one decoder, once its tables are built, a stream allocates only its output.
+## one decoder, once its tables are built, a stream allocates its output and
+## only the few small zeroed lists each dynamic block takes fresh, far less
+## than one decode table.
 ## Raising a ceiling needs a cause recorded in the pull request.
 test! : Input => Fuzz.Outcome
 test! = |input| {
@@ -66,8 +68,9 @@ test! = |input| {
 	if decoded != texts.map(|plain| Ok(plain)) {
 		crash "decompress_with did not give back the plaintexts"
 	}
-	if decoded_stats.allocs + decoded_stats.reallocs > warm_decode_allocation_ceiling(List.len(texts)) {
-		crash "a warm decoder allocated more than its outputs"
+	outputs_bytes = texts.map(|text| List.len(text) + output_scratch).sum()
+	if decoded_stats.reallocs > 0 or decoded_stats.requested_bytes > outputs_bytes + warm_decode_overhead_ceiling * List.len(texts) + 64 {
+		crash "a warm decoder allocated more than its outputs and a dynamic block's small lists"
 	}
 	Fuzz.keep
 }
@@ -123,10 +126,16 @@ fixed_tables = |level|
 		1
 	}
 
-# Exact: one output per stream and the list that holds them, so a warm
-# decoder that allocated any table would cross it.
-warm_decode_allocation_ceiling : U64 -> U64
-warm_decode_allocation_ceiling = |streams| 1 + streams
+# The match-copy scratch a declared size reserves past the output.
+output_scratch : U64
+output_scratch = 40
+
+# Measured on nightly-2026-11-07-ad3a5d2 over a 2,145-input corpus: at most
+# 1,156 bytes a stream beyond its output, the small zeroed lists its dynamic
+# blocks take fresh and its slot in the outputs list. One decode table is
+# 9,368 bytes, so a warm decoder that rebuilt a table's storage would cross it.
+warm_decode_overhead_ceiling : U64
+warm_decode_overhead_ceiling = 2_000
 
 text : List(U8)
 text = "the cat, the cow, the crow, then the cricket saw the cow again and again".to_utf8()
