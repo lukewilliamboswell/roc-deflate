@@ -10,7 +10,7 @@ import DeflateTables
 ##     only the top counter's contents handed to a heapsort, because most
 ##     frequencies are small
 ##   - the tree keeps only non-leaf nodes, stored in the same array as the
-##     frequencies, holding parent indices rather than child pointers; a
+##     frequencies, holding parent indices rather than child pointers, because a
 ##     canonical code needs only the number of leaves at each depth, which
 ##     that stripped tree yields
 ##   - the length limit is met by clamping depths as they are computed rather
@@ -38,7 +38,7 @@ HuffmanEncode := [].{
 	## whose children already satisfy it, by sifting the root down. Indices are
 	## 1-based over the window that starts at `base`, matching libdeflate's
 	## pointer decrement.
-	heapify_subtree : List(U32), U64, U64, U64 -> Try(List(U32), [CompressBug])
+	heapify_subtree : List(U32), U64, U64, U64 -> List(U32)
 	heapify_subtree = |a0, base, length, subtree_idx| {
 		var $a = a0
 		v = List.get($a, base + subtree_idx - 1) ?? 0
@@ -64,27 +64,27 @@ HuffmanEncode := [].{
 				} else {
 					$a = match List.set($a, base + $parent_idx - 1, child) {
 						Ok(next) => next
-						Err(_) => return Err(CompressBug)
+						Err(_) => crash "HuffmanEncode.heapify_subtree: a index out of bounds"
 					}
 					$parent_idx = child_idx
 				}
 			}
 		}
 		match List.set($a, base + $parent_idx - 1, v) {
-			Ok(next) => Ok(next)
-			Err(_) => Err(CompressBug)
+			Ok(next) => next
+			Err(_) => crash "HuffmanEncode.heapify_subtree: a index out of bounds"
 		}
 	}
 
 	## Sort `length` entries starting at `base` ascending, by heapsort.
-	heap_sort : List(U32), U64, U64 -> Try(List(U32), [CompressBug])
+	heap_sort : List(U32), U64, U64 -> List(U32)
 	heap_sort = |a0, base, length| {
 		var $a = a0
 
 		# Build the heap, bottom up.
 		var $subtree_idx = length // 2
 		while $subtree_idx >= 1 {
-			$a = HuffmanEncode.heapify_subtree($a, base, length, $subtree_idx)?
+			$a = HuffmanEncode.heapify_subtree($a, base, length, $subtree_idx)
 			$subtree_idx = $subtree_idx - 1
 		}
 
@@ -95,16 +95,16 @@ HuffmanEncode := [].{
 			first = List.get($a, base) ?? 0
 			$a = match List.set($a, base + $len - 1, first) {
 				Ok(next) => next
-				Err(_) => return Err(CompressBug)
+				Err(_) => crash "HuffmanEncode.heap_sort: a index out of bounds"
 			}
 			$a = match List.set($a, base, last) {
 				Ok(next) => next
-				Err(_) => return Err(CompressBug)
+				Err(_) => crash "HuffmanEncode.heap_sort: a index out of bounds"
 			}
 			$len = $len - 1
-			$a = HuffmanEncode.heapify_subtree($a, base, $len, 1)?
+			$a = HuffmanEncode.heapify_subtree($a, base, $len, 1)
 		}
-		Ok($a)
+		$a
 	}
 
 	SortedSymbols : { symout : List(U32), lens : List(U8), num_used_syms : U64 }
@@ -113,9 +113,9 @@ HuffmanEncode := [].{
 	## with zero frequency and setting their codeword lengths to zero.
 	##
 	## Most frequencies are small, so a counting sort over one counter per
-	## symbol places nearly every symbol directly; only the symbols that landed
+	## symbol places nearly every symbol directly. Only the symbols that landed
 	## in the saturating top counter need the comparison sort.
-	sort_symbols : U64, List(U32), List(U8), List(U32) -> Try(SortedSymbols, [CompressBug])
+	sort_symbols : U64, List(U32), List(U8), List(U32) -> SortedSymbols
 	sort_symbols = |num_syms, freqs, lens0, symout0| {
 		var $lens = lens0
 		var $symout = symout0
@@ -129,7 +129,7 @@ HuffmanEncode := [].{
 			slot_count = (List.get($counters, slot) ?? 0) + 1
 			$counters = match List.set($counters, slot, slot_count) {
 				Ok(next) => next
-				Err(_) => return Err(CompressBug)
+				Err(_) => crash "HuffmanEncode.sort_symbols: counters index out of bounds"
 			}
 			$sym = $sym + 1
 		}
@@ -142,7 +142,7 @@ HuffmanEncode := [].{
 			count = List.get($counters, $i) ?? 0
 			$counters = match List.set($counters, $i, $num_used_syms) {
 				Ok(next) => next
-				Err(_) => return Err(CompressBug)
+				Err(_) => crash "HuffmanEncode.sort_symbols: counters index out of bounds"
 			}
 			$num_used_syms = $num_used_syms + count
 			$i = $i + 1
@@ -156,17 +156,17 @@ HuffmanEncode := [].{
 				at = List.get($counters, slot) ?? 0
 				$counters = match List.set($counters, slot, at + 1) {
 					Ok(next) => next
-					Err(_) => return Err(CompressBug)
+					Err(_) => crash "HuffmanEncode.sort_symbols: counters index out of bounds"
 				}
 				packed = $sym.to_u32_wrap().bitwise_or(freq.shl_wrap(HuffmanEncode.num_symbol_bits.to_u8_wrap()))
 				$symout = match List.set($symout, at, packed) {
 					Ok(next) => next
-					Err(_) => return Err(CompressBug)
+					Err(_) => crash "HuffmanEncode.sort_symbols: symout index out of bounds"
 				}
 			} else {
 				$lens = match List.set($lens, $sym, 0) {
 					Ok(next) => next
-					Err(_) => return Err(CompressBug)
+					Err(_) => crash "HuffmanEncode.sort_symbols: lens index out of bounds"
 				}
 			}
 			$sym = $sym + 1
@@ -175,9 +175,9 @@ HuffmanEncode := [].{
 		# Sort the symbols that saturated the last counter.
 		sort_base = List.get($counters, num_counters - 2) ?? 0
 		sort_len = (List.get($counters, top) ?? 0) - sort_base
-		$symout = HuffmanEncode.heap_sort($symout, sort_base, sort_len)?
+		$symout = HuffmanEncode.heap_sort($symout, sort_base, sort_len)
 
-		Ok({ symout: $symout, lens: $lens, num_used_syms: $num_used_syms })
+		{ symout: $symout, lens: $lens, num_used_syms: $num_used_syms }
 	}
 
 	## Build the stripped-down Huffman tree in place: only non-leaf nodes, each
@@ -187,7 +187,7 @@ HuffmanEncode := [].{
 	## frequency order, so the next two lowest-frequency nodes are always
 	## reachable without a heap: they are the next two leaves, the next two
 	## non-leaves, or one of each.
-	build_tree : List(U32), U64 -> Try(List(U32), [CompressBug])
+	build_tree : List(U32), U64 -> List(U32)
 	build_tree = |a0, sym_count| {
 		var $a = a0
 		last_idx = sym_count - 1
@@ -216,11 +216,11 @@ HuffmanEncode := [].{
 					sym_b1 = (List.get($a, $b + 1) ?? 0).bitwise_and(HuffmanEncode.symbol_mask)
 					$a = match List.set($a, $b, parent.bitwise_or(sym_b)) {
 						Ok(next) => next
-						Err(_) => return Err(CompressBug)
+						Err(_) => crash "HuffmanEncode.build_tree: a index out of bounds"
 					}
 					$a = match List.set($a, $b + 1, parent.bitwise_or(sym_b1)) {
 						Ok(next) => next
-						Err(_) => return Err(CompressBug)
+						Err(_) => crash "HuffmanEncode.build_tree: a index out of bounds"
 					}
 					$b = $b + 2
 					freq_b.plus_wrap(freq_b1)
@@ -229,7 +229,7 @@ HuffmanEncode := [].{
 					sym_b = (List.get($a, $b) ?? 0).bitwise_and(HuffmanEncode.symbol_mask)
 					$a = match List.set($a, $b, parent.bitwise_or(sym_b)) {
 						Ok(next) => next
-						Err(_) => return Err(CompressBug)
+						Err(_) => crash "HuffmanEncode.build_tree: a index out of bounds"
 					}
 					$i = $i + 1
 					$b = $b + 1
@@ -239,7 +239,7 @@ HuffmanEncode := [].{
 			sym_e = (List.get($a, $e) ?? 0).bitwise_and(HuffmanEncode.symbol_mask)
 			$a = match List.set($a, $e, new_freq.bitwise_or(sym_e)) {
 				Ok(next) => next
-				Err(_) => return Err(CompressBug)
+				Err(_) => crash "HuffmanEncode.build_tree: a index out of bounds"
 			}
 			$e = $e + 1
 			# A tree with n leaves has n - 1 non-leaves.
@@ -248,7 +248,7 @@ HuffmanEncode := [].{
 			} else {
 			}
 		}
-		Ok($a)
+		$a
 	}
 
 	## Count how many codewords each length gets, honoring the length limit.
@@ -259,20 +259,20 @@ HuffmanEncode := [].{
 	## from its own depth to two at the next depth down. A depth past the limit
 	## is clamped to the deepest length already in use, which is what keeps the
 	## code length-limited.
-	compute_length_counts : List(U32), U64, U64 -> Try({ a : List(U32), len_counts : List(U64) }, [CompressBug])
+	compute_length_counts : List(U32), U64, U64 -> { a : List(U32), len_counts : List(U64) }
 	compute_length_counts = |a0, root_idx, max_len| {
 		var $a = a0
 		var $len_counts = List.repeat(0.U64, max_len + 2)
 		$len_counts = match List.set($len_counts, 1, 2) {
 			Ok(next) => next
-			Err(_) => return Err(CompressBug)
+			Err(_) => crash "HuffmanEncode.compute_length_counts: len_counts index out of bounds"
 		}
 
 		# The root sits at depth zero.
 		root_sym = (List.get($a, root_idx) ?? 0).bitwise_and(HuffmanEncode.symbol_mask)
 		$a = match List.set($a, root_idx, root_sym) {
 			Ok(next) => next
-			Err(_) => return Err(CompressBug)
+			Err(_) => crash "HuffmanEncode.compute_length_counts: a index out of bounds"
 		}
 
 		var $node_plus_1 = root_idx
@@ -287,7 +287,7 @@ HuffmanEncode := [].{
 			$a = match List.set($a, node, entry.bitwise_and(HuffmanEncode.symbol_mask)
 					.bitwise_or(depth0.to_u32_wrap().shl_wrap(HuffmanEncode.num_symbol_bits.to_u8_wrap()))) {
 				Ok(next) => next
-				Err(_) => return Err(CompressBug)
+				Err(_) => crash "HuffmanEncode.compute_length_counts: a index out of bounds"
 			}
 
 			var $depth = depth0
@@ -306,16 +306,16 @@ HuffmanEncode := [].{
 
 			$len_counts = match List.set($len_counts, $depth, (List.get($len_counts, $depth) ?? 0) - 1) {
 				Ok(next) => next
-				Err(_) => return Err(CompressBug)
+				Err(_) => crash "HuffmanEncode.compute_length_counts: len_counts index out of bounds"
 			}
 			len_counts_count = (List.get($len_counts, $depth + 1) ?? 0) + 2
 			$len_counts = match List.set($len_counts, $depth + 1, len_counts_count) {
 				Ok(next) => next
-				Err(_) => return Err(CompressBug)
+				Err(_) => crash "HuffmanEncode.compute_length_counts: len_counts index out of bounds"
 			}
 			$node_plus_1 = node
 		}
-		Ok({ a: $a, len_counts: $len_counts })
+		{ a: $a, len_counts: $len_counts }
 	}
 
 	## Reverse the low `len` bits of a codeword. DEFLATE writes codewords most
@@ -350,7 +350,7 @@ HuffmanEncode := [].{
 	## frequency order the array is already in, so the rarest symbols get the
 	## longest codewords. The codewords themselves come from a running first
 	## codeword per length, which is what makes the code canonical.
-	gen_codewords : List(U32), List(U8), List(U64), U64, U64 -> Try({ a : List(U32), lens : List(U8) }, [CompressBug])
+	gen_codewords : List(U32), List(U8), List(U64), U64, U64 -> { a : List(U32), lens : List(U8) }
 	gen_codewords = |a0, lens0, len_counts, max_len, num_syms| {
 		var $a = a0
 		var $lens = lens0
@@ -363,7 +363,7 @@ HuffmanEncode := [].{
 				sym = (List.get($a, $i) ?? 0).bitwise_and(HuffmanEncode.symbol_mask).to_u64()
 				$lens = match List.set($lens, sym, $len.to_u8_wrap()) {
 					Ok(next) => next
-					Err(_) => return Err(CompressBug)
+					Err(_) => crash "HuffmanEncode.gen_codewords: lens index out of bounds"
 				}
 				$i = $i + 1
 				$count = $count - 1
@@ -379,7 +379,7 @@ HuffmanEncode := [].{
 			prev_count = (List.get(len_counts, $l - 1) ?? 0).to_u32_wrap()
 			$next_codewords = match List.set($next_codewords, $l, prev.plus_wrap(prev_count).shl_wrap(1)) {
 				Ok(next) => next
-				Err(_) => return Err(CompressBug)
+				Err(_) => crash "HuffmanEncode.gen_codewords: next_codewords index out of bounds"
 			}
 			$l = $l + 1
 		}
@@ -390,27 +390,27 @@ HuffmanEncode := [].{
 			codeword = List.get($next_codewords, sym_len) ?? 0
 			$next_codewords = match List.set($next_codewords, sym_len, codeword + 1) {
 				Ok(next) => next
-				Err(_) => return Err(CompressBug)
+				Err(_) => crash "HuffmanEncode.gen_codewords: next_codewords index out of bounds"
 			}
 			$a = match List.set($a, $sym, HuffmanEncode.reverse_codeword(codeword, sym_len)) {
 				Ok(next) => next
-				Err(_) => return Err(CompressBug)
+				Err(_) => crash "HuffmanEncode.gen_codewords: a index out of bounds"
 			}
 			$sym = $sym + 1
 		}
-		Ok({ a: $a, lens: $lens })
+		{ a: $a, lens: $lens }
 	}
 
 	Code : { lens : List(U8), codewords : List(U32) }
 
 	## Build a length-limited canonical Huffman code for one alphabet.
 	##
-	## The caller supplies the scratch lists for the lengths and codewords; the
+	## The caller supplies the scratch lists for the lengths and codewords. The
 	## codeword list doubles as the sort and tree array while the code is being
 	## built, exactly as libdeflate reuses that storage.
-	make_code : U64, U64, List(U32), List(U8), List(U32) -> Try(Code, [CompressBug])
+	make_code : U64, U64, List(U32), List(U8), List(U32) -> Code
 	make_code = |num_syms, max_len, freqs, lens0, codewords0| {
-		sorted = HuffmanEncode.sort_symbols(num_syms, freqs, lens0, codewords0)?
+		sorted = HuffmanEncode.sort_symbols(num_syms, freqs, lens0, codewords0)
 		num_used_syms = sorted.num_used_syms
 
 		if num_used_syms < 2 {
@@ -429,32 +429,32 @@ HuffmanEncode := [].{
 
 			$codewords = match List.set($codewords, 0, 0) {
 				Ok(next) => next
-				Err(_) => return Err(CompressBug)
+				Err(_) => crash "HuffmanEncode.make_code: codewords index out of bounds"
 			}
 			$lens = match List.set($lens, 0, 1) {
 				Ok(next) => next
-				Err(_) => return Err(CompressBug)
+				Err(_) => crash "HuffmanEncode.make_code: lens index out of bounds"
 			}
 			$codewords = match List.set($codewords, nonzero_idx, 1) {
 				Ok(next) => next
-				Err(_) => return Err(CompressBug)
+				Err(_) => crash "HuffmanEncode.make_code: codewords index out of bounds"
 			}
 			$lens = match List.set($lens, nonzero_idx, 1) {
 				Ok(next) => next
-				Err(_) => return Err(CompressBug)
+				Err(_) => crash "HuffmanEncode.make_code: lens index out of bounds"
 			}
-			Ok({ lens: $lens, codewords: $codewords })
+			{ lens: $lens, codewords: $codewords }
 		} else {
-			built = HuffmanEncode.build_tree(sorted.symout, num_used_syms)?
-			counted = HuffmanEncode.compute_length_counts(built, num_used_syms - 2, max_len)?
+			built = HuffmanEncode.build_tree(sorted.symout, num_used_syms)
+			counted = HuffmanEncode.compute_length_counts(built, num_used_syms - 2, max_len)
 			generated = HuffmanEncode.gen_codewords(
 				counted.a,
 				sorted.lens,
 				counted.len_counts,
 				max_len,
 				num_syms,
-			)?
-			Ok({ lens: generated.lens, codewords: generated.a })
+			)
+			{ lens: generated.lens, codewords: generated.a }
 		}
 	}
 }

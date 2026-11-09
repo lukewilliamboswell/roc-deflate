@@ -73,7 +73,7 @@ DeflateTables := [].{
 	]
 
 	## Offset slot for `offset - 1`, for offsets up to 256. Offsets above that
-	## reuse this table shifted; see [DeflateTables.offset_slot].
+	## reuse this table shifted. See [DeflateTables.offset_slot].
 	offset_slot_tab : List(U8)
 	offset_slot_tab = [
 		0, 1, 2, 3, 4, 4, 5, 5, 6, 6, 6, 6, 7, 7, 7, 7,

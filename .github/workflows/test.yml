@@ -34,4 +34,5 @@ jobs:
     with:
       roc: ${{ needs.roc-versions.outputs.nightly }}
       label: Tests
+      setup: .github/scripts/install-libdeflate.sh
       opts: '["speed", "dev", "size", "interpreter"]'

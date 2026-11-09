@@ -35,16 +35,28 @@ Matchfinder := [].{
 	init_nodes = |num_entries|
 		List.repeat(0.U16, num_entries)
 
+	## A table of `num_entries` cleared nodes, reusing `table` when it is a
+	## previous stream's table of that size, as libdeflate clears its
+	## compressor's tables at the start of every stream.
+	reset_nodes : List(U16), U64 -> List(U16)
+	reset_nodes = |table, num_entries|
+		if List.len(table) == num_entries {
+			List.map(table, |_| 0)
+		} else {
+			List.repeat(0.U16, num_entries)
+		}
+
 	## Slide a node table back by one window: a saturating subtract, since a
 	## node already in the first window stays permanently out of it.
 	rebase_nodes : List(U16) -> List(U16)
 	rebase_nodes = |table|
-		List.map(table, |v| if v >= 32768 { v.minus_wrap(32768) } else { 0 })
+		List.map(table, |v| v.minus_saturated(32768))
 
 	## Absolute input index of a biased node.
 	node_index : U64, U16 -> U64
 	node_index = |in_base, node|
 		in_base.plus_wrap(node.to_u64()).minus_wrap(Matchfinder.node_bias)
+
 
 	## Number of bytes at `match_at` that equal the bytes at `str_at`, counting
 	## the `start_len` bytes the caller already matched and stopping at
@@ -53,7 +65,7 @@ Matchfinder := [].{
 	## Whole words are compared at a time and the first differing word is
 	## located by its lowest set bit, so a mismatch costs one count rather than
 	## a byte loop. The caller guarantees `max_len` bytes are readable at both
-	## positions; the entry test states that guarantee where the compiler can
+	## positions. The entry test states that guarantee where the compiler can
 	## see it, and every word read below is then provably in bounds: each read
 	## index is `str_at + len` or `match_at + len` with `len + 8 <= max_len`,
 	## the string side stays within the tested `str_at + max_len`, and the
@@ -61,7 +73,7 @@ Matchfinder := [].{
 	lz_extend : List(U8), U64, U64, U64, U64 -> U64
 	lz_extend = |input, str_at, match_at, start_len, max_len| {
 		if str_at + max_len > List.len(input) or match_at >= str_at {
-			crash "lz_extend: match window outside the input"
+			crash "Matchfinder.lz_extend: match window outside the input"
 		} else {
 		}
 		var $len = start_len

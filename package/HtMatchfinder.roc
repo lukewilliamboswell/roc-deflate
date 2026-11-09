@@ -51,13 +51,13 @@ HtMatchfinder := [].{
 	## with this hash. The copy happens even when the first candidate already
 	## reaches `nice_len`, which costs nothing and keeps the store off the
 	## branch.
-	longest_match : List(U16), U64, U64, List(U8), U64, U64, U64 -> Try(Match, [CompressBug])
+	longest_match : List(U16), U64, U64, List(U8), U64, U64, U64 -> Match
 	longest_match = |tab_0, base_0, hash_0, input, in_next, max_len, nice_len| {
 		# The caller leaves at least the hash's bytes readable past the current
-		# position; stating that here lets the reads at and just past the
+		# position. Stating that here lets the reads at and just past the
 		# position skip their bounds tests.
 		if in_next + max_len > List.len(input) or max_len < HtMatchfinder.required_nbytes {
-			return Err(CompressBug)
+			crash "HtMatchfinder.longest_match: match window outside the input"
 		} else {
 		}
 		var $tab = tab_0
@@ -78,20 +78,20 @@ HtMatchfinder := [].{
 
 		slot0 = hash.bitwise_and(0x7FFF).times_wrap(2)
 		if slot0.plus_wrap(1) >= List.len($tab) {
-			return Err(CompressBug)
+			crash "HtMatchfinder.longest_match: hash bucket outside the table"
 		} else {
 		}
 		cur_node0 = List.get($tab, slot0) ?? 0
 		tab1 = match List.set($tab, slot0, cur_pos.plus_wrap(Matchfinder.node_bias).to_u16_wrap()) {
 			Ok(next) => next
-			Err(_) => return Err(CompressBug)
+			Err(_) => crash "HtMatchfinder.longest_match: tab index out of bounds"
 		}
 
 		var $best_len = 0.U64
 		var $best_match_at = in_next
 
 		if cur_node0.to_u64() <= cur_pos {
-			Ok({ hash_tab: tab1, in_cur_base: in_base, next_hash, length: 0, offset: 0 })
+			{ hash_tab: tab1, in_cur_base: in_base, next_hash, length: 0, offset: 0 }
 		} else {
 			match0_at = Matchfinder.node_index(in_base, cur_node0)
 
@@ -99,7 +99,7 @@ HtMatchfinder := [].{
 			cur_node1 = List.get(tab1, slot0.plus_wrap(1)) ?? 0
 			var $tab2 = match List.set(tab1, slot0.plus_wrap(1), cur_node0) {
 				Ok(next) => next
-				Err(_) => return Err(CompressBug)
+				Err(_) => crash "HtMatchfinder.longest_match: tab1 index out of bounds"
 			}
 
 			if (U32.from_le_bytes(input, match0_at) ?? 0) == seq {
@@ -132,29 +132,30 @@ HtMatchfinder := [].{
 				}
 			}
 
-			Ok({
+			{
 				hash_tab: $tab2,
 				in_cur_base: in_base,
 				next_hash,
 				length: $best_len,
 				offset: in_next.minus_wrap($best_match_at),
-			})
+			}
 		}
 	}
 
 	## Insert `count` positions into the buckets without searching them.
-	skip_bytes : List(U16), U64, U64, List(U8), U64, U64, U64 -> Try(State, [CompressBug])
+	skip_bytes : List(U16), U64, U64, List(U8), U64, U64, U64 -> State
 	skip_bytes = |tab_0, base_0, hash_0, input, in_next0, in_end, count| {
 		# The run ends at `end`, and every hash read the loop makes lies within
-		# `required_nbytes` of it. Bounding the run against the input's length
-		# here, and the bucket table's size once after any slide, lets the
-		# range prover discharge the bounds test on every read and bucket
-		# access in the loop, so each byte pays only for the work itself.
-		end = in_next0.plus_wrap(count)
-		if end.plus_wrap(HtMatchfinder.required_nbytes) > in_end {
-			Ok({ hash_tab: tab_0, in_cur_base: base_0, next_hash: hash_0 })
+		# `required_nbytes` of it. These two sums are checked rather than
+		# wrapping so that the bound they establish is a fact the range prover
+		# can carry into the loop: with it, and the bucket table's size once
+		# after any slide, every read and bucket access in the loop is proven
+		# in bounds, so each byte pays only for the work itself.
+		end = in_next0 + count
+		if end + HtMatchfinder.required_nbytes > in_end {
+			{ hash_tab: tab_0, in_cur_base: base_0, next_hash: hash_0 }
 		} else if in_end > List.len(input) {
-			Err(CompressBug)
+			crash "HtMatchfinder.skip_bytes: input end past the input"
 		} else {
 			var $tab = tab_0
 			var $base = base_0
@@ -168,7 +169,7 @@ HtMatchfinder := [].{
 			} else {
 			}
 			if List.len($tab) < HtMatchfinder.table_size {
-				return Err(CompressBug)
+				crash "HtMatchfinder.skip_bytes: hash table too short"
 			} else {
 			}
 
@@ -176,23 +177,26 @@ HtMatchfinder := [].{
 			# a bucket index is a masked hash doubled, so nothing here can overflow
 			# and a checked add would only cost a branch per byte.
 			var $hash = hash_0
+			# The node written for each position is the biased position, so the
+			# loop carries it directly rather than biasing on every store.
+			var $node = $cur_pos.plus_wrap(Matchfinder.node_bias.to_i64_wrap())
 			while $in_next < end {
 				slot0 = $hash.bitwise_and(0x7FFF).times_wrap(2)
 				first = List.get($tab, slot0) ?? 0
 				tab1 = match List.set($tab, slot0.plus_wrap(1), first) {
 					Ok(next) => next
-					Err(_) => return Err(CompressBug)
+					Err(_) => crash "HtMatchfinder.skip_bytes: tab index out of bounds"
 				}
-				$tab = match List.set(tab1, slot0, $cur_pos.plus_wrap(Matchfinder.node_bias.to_i64_wrap()).to_u16_wrap()) {
+				$tab = match List.set(tab1, slot0, $node.to_u16_wrap()) {
 					Ok(next) => next
-					Err(_) => return Err(CompressBug)
+					Err(_) => crash "HtMatchfinder.skip_bytes: tab1 index out of bounds"
 				}
 
 				$in_next = $in_next.plus_wrap(1)
 				$hash = Matchfinder.lz_hash(U32.from_le_bytes(input, $in_next) ?? 0, HtMatchfinder.hash_order)
-				$cur_pos = $cur_pos.plus_wrap(1)
+				$node = $node.plus_wrap(1)
 			}
-			Ok({ hash_tab: $tab, in_cur_base: $base, next_hash: $hash })
+			{ hash_tab: $tab, in_cur_base: $base, next_hash: $hash }
 		}
 	}
 }

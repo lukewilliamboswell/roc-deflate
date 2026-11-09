@@ -11,13 +11,13 @@
 ##
 ##     roc build --opt=speed tests/ratios.roc && ./tests/ratios
 app [main!] {
-	pf: platform "https://github.com/roc-lang/basic-cli/releases/download/0.23.0/GNN5tt2gKdX4dhawg4915C4YB193woHFdcCkz31fhGxv.tar.zst",
+	pf: platform "https://github.com/roc-lang/basic-cli/releases/download/0.27.0/9yjxqdGTP4xSpSEmDazwTmRsehfRZzA19pwEKkR6fj1g.tar.zst",
 	deflate: "../package/main.roc",
 }
 
 import pf.Stdout
 import pf.Path
-import pf.IOErr exposing [IOErr]
+import pf.IOErr
 import pf.OsStr
 import deflate.Deflate
 
@@ -43,13 +43,13 @@ main! = |_| {
 }
 
 # Compress at one level and fail if the output is larger than the ceiling.
-check! : Str, List(U8), U64, U64 => Try({}, [Exit(I32), StdoutErr(IOErr)])
+check! : Str, List(U8), Deflate.Level, U64 => Try({}, [Exit(I32), Interrupted, StdoutErr(IOErr)])
 check! = |name, corpus, level, ceiling| {
-	size = (Deflate.compress(corpus, level) ? |_| Exit(1)).len()
+	size = Deflate.compress(corpus, level).len()
 	if size <= ceiling {
 		Stdout.line!("  ${name}: ${size.to_str()} bytes (ceiling ${ceiling.to_str()})")
 	} else {
-		Stdout.line!("  ${name}: REGRESSION — ${size.to_str()} > ceiling ${ceiling.to_str()}")?
+		Stdout.line!("  ${name}: REGRESSION (${size.to_str()} > ceiling ${ceiling.to_str()})")?
 		Err(Exit(1))
 	}
 }
