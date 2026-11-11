@@ -117,4 +117,3 @@ Quite nice!
 - `state_reuse`: streams through one `Compressor` and one `Decoder` give the bytes the one-off calls do.
 
 Each also wraps the operation in a measured region and asserts allocation ceilings written in the target with the nightly they were measured on: the decoder holds its tables plus its bounded output, never anything in proportion to what a stream asks for, a truthful declared size never reallocates, each level's compressor holds a fixed set of tables plus storage linear in the input, and reused state allocates its tables once. A ceiling only ever moves down.
-
