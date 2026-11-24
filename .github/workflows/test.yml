@@ -12,14 +12,36 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # The release gate: roc check, roc test, the examples, the bundle sanity
-  # check and ./tests.roc under the flake's compiler. tests.roc drives real
-  # gzip, which the flake's dev shell provides.
+  # The release gate: roc check, roc test, the examples and ./tests.roc, then
+  # the bundle sanity check, on a pinned prebuilt nightly. Temporary, instead
+  # of test.yml@v3's roc-nix build: roc-nix cannot build a520eed (a Zig
+  # compile error in src/unbundle/download.zig). Keep the pin equal to the
+  # flake's `nightly`.
   test:
     name: Required
-    uses: niclas-ahden/roc-workflows/.github/workflows/test.yml@v3
-    secrets:
-      CACHIX_AUTH_TOKEN: ${{ secrets.CACHIX_AUTH_TOKEN }}
+    uses: niclas-ahden/roc-workflows/.github/workflows/suite.yml@v3
+    with:
+      roc: nightly-2026-11-18-a520eed
+      label: Tests
+      setup: .github/scripts/install-libdeflate.sh
+      os: '["ubuntu-24.04", "macos-15"]'
+
+  bundle:
+    name: 'Required: bundle'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: niclas-ahden/roc-workflows
+          ref: v3
+          path: .ci
+      - name: Install Roc
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: .ci/.github/scripts/install-roc.sh nightly-2026-11-18-a520eed
+      - name: Bundle sanity check
+        run: .ci/.github/scripts/bundle.sh package/main.roc "$RUNNER_TEMP/bundle-check"
 
   roc-versions:
     name: 'Optional: look up Roc versions'

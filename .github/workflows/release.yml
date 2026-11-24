@@ -20,9 +20,18 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # On a pinned prebuilt nightly, as in test.yml. Temporary, instead of
+  # test.yml@v3's roc-nix build: roc-nix cannot build a520eed (a Zig compile
+  # error in src/unbundle/download.zig). The draft bundles with the flake's
+  # roc, which is the same prebuilt nightly.
   test:
     name: Required
-    uses: niclas-ahden/roc-workflows/.github/workflows/test.yml@v3
+    uses: niclas-ahden/roc-workflows/.github/workflows/suite.yml@v3
+    with:
+      roc: nightly-2026-11-18-a520eed
+      label: Tests
+      setup: .github/scripts/install-libdeflate.sh
+      os: '["ubuntu-24.04", "macos-15"]'
 
   draft:
     name: Draft

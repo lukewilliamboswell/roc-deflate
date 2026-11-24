@@ -9,7 +9,8 @@ import CompressOptimal
 ## `decompress` handles all three block types (stored, fixed Huffman, dynamic
 ## Huffman), so it reads streams produced by zlib, gzip, and ZIP tools.
 ## `compress` takes a `Level` from 0 to 12 with the same meaning libdeflate
-## gives it: the level selects the parser and how hard it searches.
+## gives it: the level selects the parser and how hard it searches. `Gzip`
+## reads and writes the gzip files around these streams.
 
 ## Errors that can occur when decompressing a DEFLATE stream.
 ##
