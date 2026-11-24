@@ -71,16 +71,28 @@ Inflate := [].{
 	## back fresh state instead.
 	inflate : Scratch, List(U8), List(U8), U64, U64 -> { scratch : Scratch, output : Try(List(U8), [CorruptData, UnexpectedEnd, OutputLimitExceeded]) }
 	inflate = |scratch, input, out, max_output, reserve| {
+		done = Inflate.inflate_from(scratch, input, 0, out, max_output, reserve)
+		{ scratch: done.scratch, output: done.output.map_ok(|ok| ok.out) }
+	}
+
+	## `inflate` for a stream that starts `in_start` bytes into `input`, such
+	## as one inside a gzip member, giving the index of the first byte after
+	## the stream as `in_end` too.
+	##
+	## `in_end` counts only the bytes the stream used, not the ones the
+	## bitbuffer read ahead, so it is where whatever follows the stream begins.
+	inflate_from : Scratch, List(U8), U64, List(U8), U64, U64 -> { scratch : Scratch, output : Try({ out : List(U8), in_end : U64 }, [CorruptData, UnexpectedEnd, OutputLimitExceeded]) }
+	inflate_from = |scratch, input, in_start, out, max_output, reserve| {
 		# The reservation and the match-copy scratch past it.
 		reserved = if reserve == 0 or max_output == 0 { out } else { List.reserve(out, reserve.min(max_output).plus_saturated(Inflate.copy_scratch)) }
-		match Inflate.inflate_stream(scratch, input, reserved, max_output) {
-			Ok(done) => { scratch: done.scratch, output: Ok(done.out) }
+		match Inflate.inflate_stream(scratch, input, in_start, reserved, max_output) {
+			Ok(done) => { scratch: done.scratch, output: Ok({ out: done.out, in_end: done.in_end }) }
 			Err(err) => { scratch: Inflate.new_scratch(), output: Err(err) }
 		}
 	}
 
-	inflate_stream : Scratch, List(U8), List(U8), U64 -> Try({ scratch : Scratch, out : List(U8) }, [CorruptData, UnexpectedEnd, OutputLimitExceeded])
-	inflate_stream = |scratch, input, out, max_output| {
+	inflate_stream : Scratch, List(U8), U64, List(U8), U64 -> Try({ scratch : Scratch, out : List(U8), in_end : U64 }, [CorruptData, UnexpectedEnd, OutputLimitExceeded])
+	inflate_stream = |scratch, input, in_start, out, max_output| {
 		in_len = List.len(input)
 		out_start = List.len(out)
 		# The most bytes the output may hold, which no list length reaches
@@ -92,7 +104,7 @@ Inflate := [].{
 		}
 
 		var $out = out
-		var $in_next = 0.U64
+		var $in_next = in_start.min(in_len)
 		var $bitbuf = 0.U64
 		var $bitsleft = 0.U64
 		var $overread = 0.U64
@@ -207,10 +219,15 @@ Inflate := [].{
 
 		# Consuming any of the implicit appended zero bytes means the stream
 		# was truncated.
-		if $overread > $bitsleft.shr_zf_wrap(3) {
+		unread = $bitsleft.shr_zf_wrap(3)
+		if $overread > unread {
 			Err(UnexpectedEnd)
 		} else {
 			Ok({
+				# The whole bytes the bitbuffer holds were read ahead, not used,
+				# apart from the implicit zeros, which were never input. This is
+				# libdeflate's `actual_in_nbytes`.
+				in_end: $in_next - (unread - $overread),
 				scratch: {
 					litlen: $litlen_scratch,
 					offset: $offset_scratch,

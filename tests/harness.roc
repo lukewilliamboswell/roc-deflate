@@ -15,15 +15,23 @@
 ## truncation of a stream reports `UnexpectedEnd`, and flipping any single bit
 ## of a stream decodes or fails but never crashes.
 ##
+## The gzip container is held to the same tools: real gzip's files, with and
+## without a file name and as several members, decode to the corpus under
+## `Gzip.decompress`, and `Gzip.compress`'s files decode under real `gzip -d`
+## and are the same bytes, header and trailer included, as `libdeflate-gzip`
+## writes, on the corpus and across the edge sweep. On a real gzip file every
+## truncation reports `UnexpectedEnd`, and a bit flipped anywhere either
+## fails or still gives exactly the original, never other bytes.
+##
 ## gzip and libdeflate-gzip only ever read a file and write to stdout (which
 ## we capture) or next to the file, so no large payload is fed to a stdin and
 ## there is no pipe-buffer deadlock. The flake's dev shell provides both:
 ##
 ##     nix develop -c roc tests/harness.roc
 app [main!] {
-	pf: platform "https://github.com/roc-lang/basic-cli/releases/download/0.27.0/9yjxqdGTP4xSpSEmDazwTmRsehfRZzA19pwEKkR6fj1g.tar.zst",
+	pf: platform "https://github.com/roc-lang/basic-cli/releases/download/0.28.1/7brgwR8YUqfeGrkdfF1V4GPPN7DnP7ftqub9KcrTEZtr.tar.zst",
 	deflate: "../package/main.roc",
-	crc32: "https://github.com/niclas-ahden/roc-crc32/releases/download/1.0.3/H7PGfAdWAHVHcw2RHGRkXzEZzzNjhmYm8vcDMmYvogw7.tar.zst",
+	crc32: "https://github.com/niclas-ahden/roc-crc32/releases/download/2.0.1/GVgp4MNmCBjdtJg8j2gBdsrdsKKyx4huzRz7ZtbRaYvJ.tar.zst",
 }
 
 import pf.Stdout
@@ -34,6 +42,7 @@ import pf.System
 import pf.IOErr
 import pf.OsStr
 import deflate.Deflate
+import deflate.Gzip
 import crc32.Crc32
 import TextGen
 import "../fuzz/bomb.deflate" as bomb : List(U8)
@@ -95,6 +104,9 @@ main! = |args| {
 
 	Stdout.line!("== decoder errors")?
 	check_decoder_errors!(List.sublist(corpus, { start: 0, len: 4096 }), tmp)?
+
+	Stdout.line!("== gzip files: real gzip reads ours and we read real gzip's")?
+	check_gzip!(corpus, corpus_os, tmp, libdeflate)?
 
 	# fuzz/inflate_bomb.roc decodes a pinned stream, so check it is still what
 	# level 6 makes of 8 MiB of zeros. `+ args.len()` keeps the compression out
@@ -221,7 +233,11 @@ check_edges! = |tmp, extra, libdeflate| {
 			_ = libdeflate_gzip!([OsStr.from_str("-k"), OsStr.from_str("-f")].concat(file_args), n)?
 		} else {}
 		for c in cases {
-			ours = Deflate.compress(c.bytes, level)
+			# The raw stream is the middle of the gzip file, which
+			# Gzip.compress builds with Deflate.compress_into, so one
+			# compression checks both the stream and the file.
+			ours_gz = Gzip.compress(c.bytes, level)
+			ours = List.sublist(ours_gz, { start: 10, len: List.len(ours_gz) - 18 })
 			if Deflate.decompress(ours, {}) != Ok(c.bytes) {
 				Stdout.line!("  level ${n.to_str()}, ${c.name}: does not round-trip")?
 				return Err(Exit(1))
@@ -234,6 +250,14 @@ check_edges! = |tmp, extra, libdeflate| {
 				gz = Path.read_bytes!(dir.join("${c.name}.gz")) ? |_| Exit(1)
 				if ours != gz.drop_first(10).drop_last(8) {
 					Stdout.line!("  level ${n.to_str()}, ${c.name}: DIFFERS from libdeflate")?
+					return Err(Exit(1))
+				} else {}
+				if ours_gz != gz {
+					Stdout.line!("  level ${n.to_str()}, ${c.name}: the gzip file DIFFERS from libdeflate-gzip's")?
+					return Err(Exit(1))
+				} else {}
+				if Gzip.decompress(gz, {}) != Ok(c.bytes) {
+					Stdout.line!("  level ${n.to_str()}, ${c.name}: libdeflate-gzip's file does not decode to the input")?
 					return Err(Exit(1))
 				} else {}
 			} else {}
@@ -391,3 +415,147 @@ append_u32_le = |bytes, value|
 		.append(value.shr_wrap(8).bitwise_and(0xFF).to_u8_wrap())
 		.append(value.shr_wrap(16).bitwise_and(0xFF).to_u8_wrap())
 		.append(value.shr_wrap(24).bitwise_and(0xFF).to_u8_wrap())
+
+# How a gzip decode came out, without printing what it decoded to.
+gzip_outcome : Try(List(U8), Gzip.GzipError) -> Str
+gzip_outcome = |result|
+	match result {
+		Ok(_) => "Ok"
+		Err(err) => Str.inspect(err)
+	}
+
+# Run real gzip with these arguments and return what it wrote to stdout.
+gzip! : List(Str) => Try(List(U8), [Exit(I32), Interrupted, StdoutErr(IOErr)])
+gzip! = |arguments| {
+	output = Cmd.new(OsStr.from_str("gzip")).args(arguments.map(OsStr.from_str)).run!() ? |_| Exit(1)
+	match output.status {
+		Exited(0) => Ok(output.stdout_bytes)
+		status => {
+			Stdout.line!("  gzip ${Str.join_with(arguments, " ")}: ${Str.inspect(status)}: ${output.stderr_utf8_lossy()}")?
+			Err(Exit(1))
+		}
+	}
+}
+
+# The gzip container in both directions against real gzip, whole files
+# against libdeflate-gzip, the trailer's CRC-32 against niclas-ahden/roc-crc32,
+# and the reader's error contract on a real gzip file.
+check_gzip! : List(U8), OsStr, Path.Path, Bool => Try({}, [Exit(I32), Interrupted, StdoutErr(IOErr)])
+check_gzip! = |corpus, corpus_os, tmp, libdeflate| {
+	corpus_arg = OsStr.display(corpus_os)
+	sample = List.sublist(corpus, { start: 0, len: 100_000 })
+	sample_path = tmp.join("roc_deflate_harness_gzip_sample.bin")
+	Path.write_bytes!(sample_path, sample) ? |_| Exit(1)
+	sample_arg = Path.display(sample_path)
+
+	# Theirs to ours. Without -n, gzip writes the file name and time, so the
+	# header has an optional field to read past.
+	for args in [["-n", "-1"], ["-n", "-6"], ["-9"]] {
+		gz = gzip!(args.concat(["-c", corpus_arg]))?
+		if Gzip.decompress(gz, {}) != Ok(corpus) {
+			Stdout.line!("  gzip ${Str.join_with(args, " ")}: MISMATCH")?
+			return Err(Exit(1))
+		} else {}
+		Stdout.line!("  gzip ${Str.join_with(args, " ")}: we read its ${gz.len().to_str()}-byte file")?
+	}
+
+	# Several members, as `cat a.gz b.gz` makes, decode to their outputs one
+	# after another, as gunzip gives them, and the bound counts them all.
+	theirs_two = gzip!(["-c", sample_arg])?.concat(gzip!(["-n", "-6", "-c", corpus_arg])?)
+	both = sample.concat(corpus)
+	if Gzip.decompress(theirs_two, {}) != Ok(both) {
+		Stdout.line!("  two gzip members: MISMATCH")?
+		return Err(Exit(1))
+	} else {}
+	if Gzip.decompress(theirs_two, { max_output: List.len(both) - 1 }) != Err(OutputLimitExceeded) {
+		Stdout.line!("  two gzip members: the bound did not count both")?
+		return Err(Exit(1))
+	} else {}
+	Stdout.line!("  two gzip members: we read them as one output, within one bound")?
+
+	# Ours to theirs, one member and several.
+	ours_path = tmp.join("roc_deflate_harness_ours_gzip.gz")
+	ours_arg = Path.display(ours_path)
+	for level in [0, 1, 6, 9, 12] {
+		Path.write_bytes!(ours_path, Gzip.compress(corpus, level)) ? |_| Exit(1)
+		if gzip!(["-dc", ours_arg])? != corpus {
+			Stdout.line!("  Gzip.compress level ${level.to_u64().to_str()}: gzip -d gave other bytes")?
+			return Err(Exit(1))
+		} else {}
+		Stdout.line!("  Gzip.compress level ${level.to_u64().to_str()}: gzip -d reads it")?
+	}
+	Path.write_bytes!(ours_path, Gzip.compress(sample, 1).concat(Gzip.compress(corpus, 6))) ? |_| Exit(1)
+	if gzip!(["-dc", ours_arg])? != both {
+		Stdout.line!("  Gzip.compress, two members: gzip -d gave other bytes")?
+		return Err(Exit(1))
+	} else {}
+	Stdout.line!("  Gzip.compress, two members: gzip -d concatenates them")?
+	Path.delete!(ours_path) ? |_| Exit(1)
+
+	# The CRC-32 is the package's own, so check the trailer against an
+	# independent implementation.
+	ours_gz = Gzip.compress(corpus, 6)
+	trailer = List.sublist(ours_gz, { start: List.len(ours_gz) - 8, len: 8 })
+	if trailer != append_u32_le(append_u32_le([], Crc32.checksum(corpus)), List.len(corpus).to_u32_wrap()) {
+		Stdout.line!("  the trailer is not niclas-ahden/roc-crc32's CRC-32 and the size")?
+		return Err(Exit(1))
+	} else {}
+	Stdout.line!("  the trailer is niclas-ahden/roc-crc32's CRC-32 and the size")?
+
+	if libdeflate {
+		for level in Deflate.Level.all.drop_first(1) {
+			theirs = libdeflate_gzip!([OsStr.from_str("-c"), corpus_os], level.to_u64())?
+			if Gzip.compress(corpus, level) != theirs {
+				Stdout.line!("  level ${level.to_u64().to_str()}: the gzip file DIFFERS from libdeflate-gzip's")?
+				return Err(Exit(1))
+			} else {}
+		}
+		Stdout.line!("  levels 1 to 12: the same bytes as libdeflate-gzip's files")?
+	} else {}
+
+	# The error contract, on a real gzip file with a file name: every
+	# truncation is UnexpectedEnd, and a bit flipped anywhere fails or, in a
+	# field nothing checks (the time, FTEXT, the extra flags, the OS, the
+	# name), still gives exactly the original, never other bytes.
+	small = List.sublist(corpus, { start: 0, len: 4096 })
+	Path.write_bytes!(sample_path, small) ? |_| Exit(1)
+	named = gzip!(["-6", "-c", sample_arg])?
+	Path.delete!(sample_path) ? |_| Exit(1)
+	var $len = 0.U64
+	while $len < List.len(named) {
+		result = Gzip.decompress(List.sublist(named, { start: 0, len: $len }), {})
+		if gzip_outcome(result) != "UnexpectedEnd" {
+			Stdout.line!("  the first ${$len.to_str()} bytes of gzip's file decode to ${gzip_outcome(result)}, not UnexpectedEnd")?
+			return Err(Exit(1))
+		} else {}
+		$len = $len + 1
+	}
+	Stdout.line!("  all ${List.len(named).to_str()} truncations of gzip's file report UnexpectedEnd")?
+
+	var $same = 0.U64
+	var $failed = 0.U64
+	var $crc = 0.U64
+	var $bit = 0.U64
+	while $bit < List.len(named) * 8 {
+		at = $bit // 8
+		byte = List.get(named, at) ?? 0
+		flipped = List.set(named, at, byte.bitwise_xor(1.U8.shl_wrap(($bit % 8).to_u8_wrap()))) ?? named
+		match Gzip.decompress(flipped, {}) {
+			Ok(bytes) =>
+				if bytes == small {
+					$same = $same + 1
+				} else {
+					Stdout.line!("  flipping bit ${$bit.to_str()} of gzip's file decodes to other bytes")?
+					return Err(Exit(1))
+				}
+			Err(CrcMismatch) => {
+				$crc = $crc + 1
+			}
+			Err(_) => {
+				$failed = $failed + 1
+			}
+		}
+		$bit = $bit + 1
+	}
+	Stdout.line!("  every bit of gzip's file flipped once: ${$same.to_str()} still the original, ${$crc.to_str()} CrcMismatch, ${$failed.to_str()} other errors")
+}

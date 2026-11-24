@@ -1,1 +1,1 @@
-package [Deflate] {}
+package [Deflate, Gzip] {}
